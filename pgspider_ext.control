@@ -1,0 +1,5 @@
+# pgspider_ext
+comment = 'foreign-data wrapper for remote PGSpider servers'
+default_version = '1.0'
+module_pathname = '$libdir/pgspider_ext'
+relocatable = true

@@ -1,0 +1,35 @@
+#include <winver.h>
+#include "pg_config.h"
+
+// https://docs.microsoft.com/en-us/windows/win32/menurc/versioninfo-resource
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    PG_MAJORVERSION_NUM,0,PG_MINORVERSION_NUM,21116
+ PRODUCTVERSION PG_MAJORVERSION_NUM,0,PG_MINORVERSION_NUM,21116
+ FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+ FILEFLAGS      0x0L
+ FILEOS         VOS_NT_WINDOWS32
+ FILETYPE	VFT_DLL
+ FILESUBTYPE    0x0L
+BEGIN
+ BLOCK "StringFileInfo"
+ BEGIN
+  BLOCK "000004b0"
+  BEGIN
+   VALUE "CompanyName",      "TOSHIBA Corporation"
+   VALUE "FileDescription",  "pgspider_ext"
+   VALUE "FileVersion",      1.0
+   VALUE "InternalName",     "pgspider_ext"
+   VALUE "LegalCopyright", "Copyright (c) 2020 - 2021, TOSHIBA Corporation"
+   VALUE "OriginalFileName", "pgspider_ext.dll"
+   VALUE "ProductName",      "PGSpider extension"
+   VALUE "ProductVersion",   1.0
+  END
+ END
+ BLOCK "VarFileInfo"
+ BEGIN
+  VALUE "Translation", 0x0, 1200
+ END
+END
+
+
