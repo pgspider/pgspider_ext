@@ -189,13 +189,15 @@ SELECT * FROM t1;
 (4 rows)
 </pre>
 
-
-
 ## Note
 If you want to pushdown aggregate functions, you needs to execute:
 <pre>
 SET enable_partitionwise_aggregate TO on;
 </pre>
+
+We have confirmed that PGSpider can connect to:
+- PostgreSQL ([postgres_fdw](https://github.com/postgres/postgres))
+- MySQL ([mysql_fdw](https://github.com/pgspider/mysql_fdw))
 
 ## Contributing
 Opening issues and pull requests on GitHub are welcome.
