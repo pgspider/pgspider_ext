@@ -1,0 +1,12 @@
+# DDL
+DROP DATABASE core_multi_db
+CREATE DATABASE core_multi_db
+
+# DML
+# CONTEXT-DATABASE: core_multi_db
+
+test1 i=2001i 86400000000000
+test1 i=2002i 172800000000000
+test3 t="influx1a",t2="influx1b",i=2101i 26400000000000
+test3 t="influx2a",t2="influx2b",i=2102i 29400000000000
+test3 t="influx3a",t2="influx3b",i=2103i 30400000000000

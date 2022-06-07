@@ -1,0 +1,31 @@
+DROP EXTENSION IF EXISTS influxdb_fdw CASCADE;
+DROP EXTENSION IF EXISTS pgspider_ext CASCADE;
+DROP EXTENSION IF EXISTS griddb_fdw CASCADE;
+DROP EXTENSION IF EXISTS file_fdw CASCADE;
+CREATE EXTENSION pgspider_ext;
+CREATE EXTENSION influxdb_fdw;
+CREATE EXTENSION griddb_fdw;
+CREATE EXTENSION file_fdw;
+-- pgspider_core_fdw
+CREATE SERVER pgspider_svr FOREIGN DATA WRAPPER pgspider_ext;
+CREATE USER MAPPING FOR public SERVER pgspider_svr;
+DROP TABLE IF EXISTS test1;
+DROP TABLE IF EXISTS test2;
+CREATE TABLE test1 (i int,__spd_url text) PARTITION BY LIST (__spd_url);
+CREATE TABLE test2 (t text, t2 text, i int,__spd_url text) PARTITION BY LIST (__spd_url);
+-- influxdb_fdw
+CREATE SERVER influxdb_svr FOREIGN DATA WRAPPER influxdb_fdw OPTIONS (dbname 'core_multi_db', host 'http://localhost', port '8086');
+CREATE USER MAPPING FOR CURRENT_USER SERVER influxdb_svr OPTIONS (user 'user', password 'pass');
+CREATE FOREIGN TABLE test1__influxdb_svr__0 (i int) SERVER influxdb_svr OPTIONS (table 'test1');
+CREATE FOREIGN TABLE test1_influxdb_child1 PARTITION OF test1 FOR VALUES IN ('/influxdb_svr/') SERVER pgspider_svr OPTIONS(child_name 'test1__influxdb_svr__0');
+CREATE FOREIGN TABLE test2__influxdb_svr__0 (t text, t2 text, i int) SERVER influxdb_svr OPTIONS (table 'test3');
+CREATE FOREIGN TABLE test2_influxdb_child1 PARTITION OF test2 FOR VALUES IN ('/influxdb_svr/') SERVER pgspider_svr OPTIONS(child_name 'test2__influxdb_svr__0');
+-- griddb_fdw
+CREATE SERVER IF NOT EXISTS griddb_svr FOREIGN DATA WRAPPER griddb_fdw OPTIONS (host '239.0.0.1', port '31999', clustername 'griddbfdwTestCluster');
+CREATE USER MAPPING FOR CURRENT_USER SERVER griddb_svr OPTIONS (username 'admin', password 'testadmin');
+CREATE FOREIGN TABLE test1__griddb_svr__0 (i int) SERVER griddb_svr OPTIONS (table_name 'test_multi');
+CREATE FOREIGN TABLE test1_griddb_child1 PARTITION OF test1 FOR VALUES IN ('/griddb_svr/') SERVER pgspider_svr OPTIONS(child_name 'test1__griddb_svr__0');
+-- file_fdw
+CREATE SERVER file_svr FOREIGN DATA WRAPPER file_fdw;
+CREATE FOREIGN TABLE test1__file_svr__0 (i int) SERVER file_svr options(filename '/tmp/pgtest.csv');
+CREATE FOREIGN TABLE test1_file_svr_child1 PARTITION OF test1 FOR VALUES IN ('/file_svr/') SERVER pgspider_svr OPTIONS(child_name 'test1__file_svr__0');

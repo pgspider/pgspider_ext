@@ -183,6 +183,9 @@ CREATE FOREIGN TABLE ft5_child PARTITION OF ft5 FOR VALUES IN ('/node1/') SERVER
 CREATE FOREIGN TABLE ft6_child PARTITION OF ft6 FOR VALUES IN ('/node1/') SERVER spdsrv OPTIONS(child_name 'ft6_orig');
 -- Enable to pushdown aggregate
 SET enable_partitionwise_aggregate TO on;
+-- Turn off leader node participation to avoid duplicate data error when executing
+-- parallel query
+SET parallel_leader_participation TO off;
 -- ===================================================================
 -- tests for validator
 -- ===================================================================
@@ -996,7 +999,7 @@ EXPLAIN (VERBOSE, COSTS OFF)
    Output: count(t1.c3)
    ->  Foreign Scan
          Output: (PARTIAL count(t1.c3))
-           Relations: Aggregate on (public.ft1_child t1)
+           Relations: Aggregate on (public.ft1_orig t1)
            Remote SQL: SELECT count(c3) FROM "S 1"."T 1" WHERE (("C 1" = abs(c2)))
 (6 rows)
 
@@ -1014,7 +1017,7 @@ EXPLAIN (VERBOSE, COSTS OFF)
    Output: count(t1.c3)
    ->  Foreign Scan
          Output: (PARTIAL count(t1.c3))
-           Relations: Aggregate on (public.ft1_child t1)
+           Relations: Aggregate on (public.ft1_orig t1)
            Remote SQL: SELECT count(c3) FROM "S 1"."T 1" WHERE (("C 1" = c2))
 (6 rows)
 
@@ -1093,7 +1096,7 @@ EXPLAIN (VERBOSE, COSTS OFF)
    Output: count(t1.c3)
    ->  Foreign Scan
          Output: (PARTIAL count(t1.c3))
-           Relations: Aggregate on (public.ft1_child t1)
+           Relations: Aggregate on (public.ft1_orig t1)
            Remote SQL: SELECT count(c3) FROM "S 1"."T 1" WHERE (("C 1" = public.postgres_fdw_abs(c2)))
 (6 rows)
 
@@ -1111,7 +1114,7 @@ EXPLAIN (VERBOSE, COSTS OFF)
    Output: count(t1.c3)
    ->  Foreign Scan
          Output: (PARTIAL count(t1.c3))
-           Relations: Aggregate on (public.ft1_child t1)
+           Relations: Aggregate on (public.ft1_orig t1)
            Remote SQL: SELECT count(c3) FROM "S 1"."T 1" WHERE (("C 1" OPERATOR(public.===) c2))
 (6 rows)
 
@@ -1811,38 +1814,39 @@ SELECT t1.c1, t2.c2, t3.c3 FROM ft2 t1 FULL JOIN ft2 t2 ON (t1.c1 = t2.c1) RIGHT
 
 -- right outer join + full outer join
 EXPLAIN (VERBOSE, COSTS OFF)
-SELECT t1.c1, t2.c2, t3.c3 FROM ft2 t1 RIGHT JOIN ft2 t2 ON (t1.c1 = t2.c1) FULL JOIN ft4 t3 ON (t2.c1 = t3.c1) OFFSET 10 LIMIT 10;
-                                QUERY PLAN                                 
----------------------------------------------------------------------------
+SELECT t1.c1, t2.c2, t3.c3 FROM ft2 t1 RIGHT JOIN ft2 t2 ON (t1.c1 = t2.c1) FULL JOIN ft4 t3 ON (t2.c1 = t3.c1) ORDER BY 1,2,3 OFFSET 10 LIMIT 10;
+                                   QUERY PLAN                                    
+---------------------------------------------------------------------------------
  Limit
    Output: t1.c1, t2.c2, t3.c3
-   ->  Hash Full Join
+   ->  Sort
          Output: t1.c1, t2.c2, t3.c3
-         Hash Cond: (t2.c1 = t3.c1)
-         ->  Nested Loop Left Join
-               Output: t2.c2, t2.c1, t1.c1
-               Join Filter: (t1.c1 = t2.c1)
-               ->  Gather
-                     Output: t2.c2, t2.c1
-                     Workers Planned: 1
-                     ->  Foreign Scan on public.ft2_child t2
+         Sort Key: t1.c1, t2.c2, t3.c3
+         ->  Hash Full Join
+               Output: t1.c1, t2.c2, t3.c3
+               Hash Cond: (t2.c1 = t3.c1)
+               ->  Nested Loop Left Join
+                     Output: t2.c2, t2.c1, t1.c1
+                     Join Filter: (t1.c1 = t2.c1)
+                     ->  Gather
                            Output: t2.c2, t2.c1
-                             Remote SQL: SELECT "C 1", c2 FROM "S 1"."T 1"
-               ->  Foreign Scan on public.ft2_child t1
-                     Output: t1.c1
-                       Remote SQL: SELECT "C 1" FROM "S 1"."T 1"
-         ->  Hash
-               Output: t3.c3, t3.c1
-               ->  Foreign Scan on public.ft4_child t3
+                           Workers Planned: 1
+                           ->  Foreign Scan on public.ft2_child t2
+                                 Output: t2.c2, t2.c1
+                                   Remote SQL: SELECT "C 1", c2 FROM "S 1"."T 1"
+                     ->  Foreign Scan on public.ft2_child t1
+                           Output: t1.c1
+                             Remote SQL: SELECT "C 1" FROM "S 1"."T 1"
+               ->  Hash
                      Output: t3.c3, t3.c1
-                       Remote SQL: SELECT c1, c3 FROM "S 1"."T 3"
-(22 rows)
+                     ->  Foreign Scan on public.ft4_child t3
+                           Output: t3.c3, t3.c1
+                             Remote SQL: SELECT c1, c3 FROM "S 1"."T 3"
+(25 rows)
 
-SELECT t1.c1, t2.c2, t3.c3 FROM ft2 t1 RIGHT JOIN ft2 t2 ON (t1.c1 = t2.c1) FULL JOIN ft4 t3 ON (t2.c1 = t3.c1) OFFSET 10 LIMIT 10;
+SELECT t1.c1, t2.c2, t3.c3 FROM ft2 t1 RIGHT JOIN ft2 t2 ON (t1.c1 = t2.c1) FULL JOIN ft4 t3 ON (t2.c1 = t3.c1) ORDER BY 1,2,3 OFFSET 10 LIMIT 10;
  c1 | c2 |   c3   
 ----+----+--------
-  9 |  9 | 
- 10 |  0 | AAA010
  11 |  1 | 
  12 |  2 | AAA012
  13 |  3 | 
@@ -1851,6 +1855,8 @@ SELECT t1.c1, t2.c2, t3.c3 FROM ft2 t1 RIGHT JOIN ft2 t2 ON (t1.c1 = t2.c1) FULL
  16 |  6 | AAA016
  17 |  7 | 
  18 |  8 | AAA018
+ 19 |  9 | 
+ 20 |  0 | AAA020
 (10 rows)
 
 -- full outer join + left outer join
@@ -1896,38 +1902,39 @@ SELECT t1.c1, t2.c2, t3.c3 FROM ft2 t1 FULL JOIN ft2 t2 ON (t1.c1 = t2.c1) LEFT 
 
 -- left outer join + full outer join
 EXPLAIN (VERBOSE, COSTS OFF)
-SELECT t1.c1, t2.c2, t3.c3 FROM ft2 t1 LEFT JOIN ft2 t2 ON (t1.c1 = t2.c1) FULL JOIN ft4 t3 ON (t2.c1 = t3.c1) OFFSET 10 LIMIT 10;
-                              QUERY PLAN                               
------------------------------------------------------------------------
+SELECT t1.c1, t2.c2, t3.c3 FROM ft2 t1 LEFT JOIN ft2 t2 ON (t1.c1 = t2.c1) FULL JOIN ft4 t3 ON (t2.c1 = t3.c1) ORDER BY 1,2,3 OFFSET 10 LIMIT 10;
+                                 QUERY PLAN                                  
+-----------------------------------------------------------------------------
  Limit
    Output: t1.c1, t2.c2, t3.c3
-   ->  Hash Full Join
+   ->  Sort
          Output: t1.c1, t2.c2, t3.c3
-         Hash Cond: (t2.c1 = t3.c1)
-         ->  Nested Loop Left Join
-               Output: t1.c1, t2.c2, t2.c1
-               Join Filter: (t1.c1 = t2.c1)
-               ->  Gather
-                     Output: t1.c1
-                     Workers Planned: 1
-                     ->  Foreign Scan on public.ft2_child t1
+         Sort Key: t1.c1, t2.c2, t3.c3
+         ->  Hash Full Join
+               Output: t1.c1, t2.c2, t3.c3
+               Hash Cond: (t2.c1 = t3.c1)
+               ->  Nested Loop Left Join
+                     Output: t1.c1, t2.c2, t2.c1
+                     Join Filter: (t1.c1 = t2.c1)
+                     ->  Gather
                            Output: t1.c1
-                             Remote SQL: SELECT "C 1" FROM "S 1"."T 1"
-               ->  Foreign Scan on public.ft2_child t2
-                     Output: t2.c2, t2.c1
-                       Remote SQL: SELECT "C 1", c2 FROM "S 1"."T 1"
-         ->  Hash
-               Output: t3.c3, t3.c1
-               ->  Foreign Scan on public.ft4_child t3
+                           Workers Planned: 1
+                           ->  Foreign Scan on public.ft2_child t1
+                                 Output: t1.c1
+                                   Remote SQL: SELECT "C 1" FROM "S 1"."T 1"
+                     ->  Foreign Scan on public.ft2_child t2
+                           Output: t2.c2, t2.c1
+                             Remote SQL: SELECT "C 1", c2 FROM "S 1"."T 1"
+               ->  Hash
                      Output: t3.c3, t3.c1
-                       Remote SQL: SELECT c1, c3 FROM "S 1"."T 3"
-(22 rows)
+                     ->  Foreign Scan on public.ft4_child t3
+                           Output: t3.c3, t3.c1
+                             Remote SQL: SELECT c1, c3 FROM "S 1"."T 3"
+(25 rows)
 
-SELECT t1.c1, t2.c2, t3.c3 FROM ft2 t1 LEFT JOIN ft2 t2 ON (t1.c1 = t2.c1) FULL JOIN ft4 t3 ON (t2.c1 = t3.c1) OFFSET 10 LIMIT 10;
+SELECT t1.c1, t2.c2, t3.c3 FROM ft2 t1 LEFT JOIN ft2 t2 ON (t1.c1 = t2.c1) FULL JOIN ft4 t3 ON (t2.c1 = t3.c1) ORDER BY 1,2,3 OFFSET 10 LIMIT 10;
  c1 | c2 |   c3   
 ----+----+--------
-  9 |  9 | 
- 10 |  0 | AAA010
  11 |  1 | 
  12 |  2 | AAA012
  13 |  3 | 
@@ -1936,6 +1943,8 @@ SELECT t1.c1, t2.c2, t3.c3 FROM ft2 t1 LEFT JOIN ft2 t2 ON (t1.c1 = t2.c1) FULL 
  16 |  6 | AAA016
  17 |  7 | 
  18 |  8 | AAA018
+ 19 |  9 | 
+ 20 |  0 | AAA020
 (10 rows)
 
 -- right outer join + left outer join
@@ -2011,16 +2020,16 @@ SELECT t1.c1, t2.c2, t3.c3 FROM ft2 t1 LEFT JOIN ft2 t2 ON (t1.c1 = t2.c1) RIGHT
 SELECT t1.c1, t2.c2, t3.c3 FROM ft2 t1 LEFT JOIN ft2 t2 ON (t1.c1 = t2.c1) RIGHT JOIN ft4 t3 ON (t2.c1 = t3.c1) OFFSET 10 LIMIT 10;
  c1 | c2 |   c3   
 ----+----+--------
- 12 |  2 | AAA012
- 12 |  2 | AAA012
- 14 |  4 | AAA014
- 14 |  4 | AAA014
- 16 |  6 | AAA016
- 16 |  6 | AAA016
- 18 |  8 | AAA018
- 18 |  8 | AAA018
- 20 |  0 | AAA020
- 20 |  0 | AAA020
+ 22 |  2 | AAA022
+ 24 |  4 | AAA024
+ 26 |  6 | AAA026
+ 28 |  8 | AAA028
+ 30 |  0 | AAA030
+ 32 |  2 | AAA032
+ 34 |  4 | AAA034
+ 36 |  6 | AAA036
+ 38 |  8 | AAA038
+ 40 |  0 | AAA040
 (10 rows)
 
 -- full outer join + WHERE clause, only matched rows
@@ -2431,18 +2440,18 @@ SELECT t1.c1, t2.c1 FROM ft1 t1 CROSS JOIN ft2 t2 ORDER BY t1.c1, t2.c1 OFFSET 1
 (16 rows)
 
 SELECT t1.c1, t2.c1 FROM ft1 t1 CROSS JOIN ft2 t2 ORDER BY t1.c1, t2.c1 OFFSET 100 LIMIT 10;
- c1 | c1 
-----+----
-  1 | 51
-  1 | 51
-  1 | 52
-  1 | 52
-  1 | 53
-  1 | 53
-  1 | 54
-  1 | 54
-  1 | 55
-  1 | 55
+ c1 | c1  
+----+-----
+  1 | 101
+  1 | 102
+  1 | 103
+  1 | 104
+  1 | 105
+  1 | 106
+  1 | 107
+  1 | 108
+  1 | 109
+  1 | 110
 (10 rows)
 
 -- different server, not pushed down. No result expected.
@@ -3108,7 +3117,7 @@ select c2/2, sum(c2) * (c2/2) from ft1 group by c2/2 order by c2/2;
          Sort Key: ((ft1.c2 / 2))
          ->  Foreign Scan
                Output: ((ft1.c2 / 2)), (PARTIAL sum(ft1.c2)), ft1.c2
-                 Relations: Aggregate on (public.ft1_child ft1)
+                 Relations: Aggregate on (public.ft1_orig ft1)
                  Remote SQL: SELECT (c2 / 2), sum(c2), c2 FROM "S 1"."T 1" GROUP BY 1, 3
 (10 rows)
 
@@ -3162,7 +3171,7 @@ select c2 * (random() <= 1)::int as sum1, sum(c1) * c2 as sum2 from ft1 group by
                Sort Key: ft1.c2
                ->  Foreign Scan
                      Output: ft1.c2, (PARTIAL sum(ft1.c1))
-                       Relations: Aggregate on (public.ft1_child ft1)
+                       Relations: Aggregate on (public.ft1_orig ft1)
                        Remote SQL: SELECT c2, sum("C 1") FROM "S 1"."T 1" GROUP BY 1
 (13 rows)
 
@@ -3213,7 +3222,7 @@ select count(c2) w, c2 x, 5 y, 7.0 z from ft1 group by 2, y, 9.0::int order by 2
          Sort Key: ft1.c2
          ->  Foreign Scan
                Output: ft1.c2, 5, 9, (PARTIAL count(ft1.c2))
-                 Relations: Aggregate on (public.ft1_child ft1)
+                 Relations: Aggregate on (public.ft1_orig ft1)
                  Remote SQL: SELECT c2, 5, 9, count(c2) FROM "S 1"."T 1" GROUP BY 1, 2, 3
 (10 rows)
 
@@ -3249,7 +3258,7 @@ select c2, c2 from ft1 where c2 > 6 group by 1, 2 order by sum(c1);
                Sort Key: ft1.c2
                ->  Foreign Scan
                      Output: ft1.c2, ft1.c2, (PARTIAL sum(ft1.c1))
-                       Relations: Aggregate on (public.ft1_child ft1)
+                       Relations: Aggregate on (public.ft1_orig ft1)
                        Remote SQL: SELECT c2, c2, sum("C 1") FROM "S 1"."T 1" WHERE ((c2 > 6)) GROUP BY 1, 2
 (13 rows)
 
@@ -3338,7 +3347,7 @@ select exists(select 1 from pg_enum), sum(c1) from ft1;
      ->  Seq Scan on pg_catalog.pg_enum
    ->  Foreign Scan
          Output: (PARTIAL sum(ft1.c1))
-           Relations: Aggregate on (public.ft1_child ft1)
+           Relations: Aggregate on (public.ft1_orig ft1)
            Remote SQL: SELECT sum("C 1") FROM "S 1"."T 1"
 (8 rows)
 
@@ -3544,7 +3553,7 @@ select sum(c1) filter (where c1 < 100 and c2 > 5) from ft1 group by c2 order by 
                Sort Key: ft1.c2
                ->  Foreign Scan
                      Output: ft1.c2, (PARTIAL sum(ft1.c1) FILTER (WHERE ((ft1.c1 < 100) AND (ft1.c2 > 5))))
-                       Relations: Aggregate on (public.ft1_child ft1)
+                       Relations: Aggregate on (public.ft1_orig ft1)
                        Remote SQL: SELECT c2, sum("C 1") FILTER (WHERE (("C 1" < 100) AND (c2 > 5))) FROM "S 1"."T 1" GROUP BY 1
 (13 rows)
 
@@ -3596,7 +3605,7 @@ select distinct (select count(*) filter (where t2.c2 = 6 and t2.c1 < 10) from ft
                Output: (SubPlan 1)
                ->  Foreign Scan
                      Output: (PARTIAL count(*) FILTER (WHERE ((t2.c2 = 6) AND (t2.c1 < 10))))
-                       Relations: Aggregate on (public.ft2_child t2)
+                       Relations: Aggregate on (public.ft2_orig t2)
                        Remote SQL: SELECT count(*) FILTER (WHERE ((c2 = 6) AND ("C 1" < 10))) FROM "S 1"."T 1" WHERE (((c2 % 6) = 0))
                SubPlan 1
                  ->  Foreign Scan on public.ft1_child t1
@@ -3940,7 +3949,7 @@ select count(*), x.b from ft1, (select c2 a, sum(c1) b from ft1 group by c2) x w
                                        Sort Key: ft1_1.c2
                                        ->  Foreign Scan
                                              Output: ft1_1.c2, (PARTIAL sum(ft1_1.c1))
-                                               Relations: Aggregate on (public.ft1_child ft1_1)
+                                               Relations: Aggregate on (public.ft1_orig x)
                                                Remote SQL: SELECT c2, sum("C 1") FROM "S 1"."T 1" GROUP BY 1
 (27 rows)
 
@@ -4035,7 +4044,7 @@ select sum(c2) * (random() <= 1)::int as sum from ft1 order by 1;
          Output: (sum(ft1.c2) * ((random() <= '1'::double precision))::integer)
          ->  Foreign Scan
                Output: (PARTIAL sum(ft1.c2))
-                 Relations: Aggregate on (public.ft1_child ft1)
+                 Relations: Aggregate on (public.ft1_orig ft1)
                  Remote SQL: SELECT sum(c2) FROM "S 1"."T 1"
 (9 rows)
 
@@ -4286,7 +4295,7 @@ select distinct sum(c1)/1000 s from ft2 where c2 < 6 group by c2 order by 1;
                      Sort Key: ft2.c2
                      ->  Foreign Scan
                            Output: ft2.c2, (PARTIAL sum(ft2.c1))
-                             Relations: Aggregate on (public.ft2_child ft2)
+                             Relations: Aggregate on (public.ft2_orig ft2)
                              Remote SQL: SELECT c2, sum("C 1") FROM "S 1"."T 1" WHERE ((c2 < 6)) GROUP BY 1
 (15 rows)
 
@@ -4318,7 +4327,7 @@ select c2, sum(c2), count(c2) over (partition by c2%2) from ft2 where c2 < 10 gr
                            Sort Key: ft2.c2
                            ->  Foreign Scan
                                  Output: ft2.c2, (PARTIAL sum(ft2.c2))
-                                   Relations: Aggregate on (public.ft2_child ft2)
+                                   Relations: Aggregate on (public.ft2_orig ft2)
                                    Remote SQL: SELECT c2, sum(c2) FROM "S 1"."T 1" WHERE ((c2 < 10)) GROUP BY 1
 (18 rows)
 
@@ -4602,7 +4611,7 @@ EXPLAIN (VERBOSE, COSTS OFF) EXECUTE st8;
    Output: count(t1.c3)
    ->  Foreign Scan
          Output: (PARTIAL count(t1.c3))
-           Relations: Aggregate on (public.ft1_child t1)
+           Relations: Aggregate on (public.ft1_orig t1)
            Remote SQL: SELECT count(c3) FROM "S 1"."T 1" WHERE (("C 1" OPERATOR(public.===) c2))
 (6 rows)
 
