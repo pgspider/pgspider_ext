@@ -70,11 +70,7 @@ git clone XXX
 
 Build and install PostgreSQL and pgspider_ext.
 <pre>
-<<<<<<< HEAD
-cd postgresql-13.2
-=======
 cd postgresql-13.5
->>>>>>> origin/RELEASE_22A
 ./configure
 make
 sudo make install
