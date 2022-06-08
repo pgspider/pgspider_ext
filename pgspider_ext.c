@@ -178,6 +178,7 @@ static bool spdIsForeignScanParallelSafe(PlannerInfo *root,
 
 /* Declarations for dynamic loading */
 PG_FUNCTION_INFO_V1(pgspider_ext_handler);
+PG_FUNCTION_INFO_V1(pgspider_ext_version);
 
 /*
  * pgspider_ext_handler populates an FdwRoutine with pointers to the functions
@@ -236,6 +237,12 @@ pgspider_ext_handler(PG_FUNCTION_ARGS)
 	routine->IsForeignScanParallelSafe = spdIsForeignScanParallelSafe;
 
 	PG_RETURN_POINTER(routine);
+}
+
+Datum
+pgspider_ext_version(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_INT32(CODE_VERSION);
 }
 
 /*

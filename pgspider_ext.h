@@ -13,6 +13,8 @@
 #include "nodes/pathnodes.h"
 #include "nodes/pg_list.h"
 
+#define CODE_VERSION   10000
+
 /*
  * Options structure to store information.
  */
