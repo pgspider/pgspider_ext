@@ -1,0 +1,289 @@
+-- PGSpider Extension does not have pg_spd_node_info table
+-- --Testcase 1:
+-- DELETE FROM pg_spd_node_info;
+--Testcase 2:
+CREATE EXTENSION pgspider_ext;
+--Testcase 3:
+CREATE SERVER pgspider_svr FOREIGN DATA WRAPPER pgspider_ext;
+--Testcase 4:
+CREATE USER MAPPING FOR public SERVER pgspider_svr;
+--Testcase 5:
+CREATE TABLE test1 (
+    one     INT8,
+    two     INT8[],
+    three   TEXT,
+    four    TIMESTAMP,
+    five    DATE,
+    six     BOOL,
+    seven   FLOAT8,
+    __spd_url text) 
+ PARTITION BY LIST (__spd_url);
+-- create parquet_s3_fdw extension
+SET datestyle = 'ISO';
+SET client_min_messages = WARNING;
+SET log_statement TO 'none';
+--Testcase 6:
+CREATE EXTENSION parquet_s3_fdw;
+--Testcase 7:
+CREATE SERVER parquet_s3_svr FOREIGN DATA WRAPPER parquet_s3_fdw OPTIONS (use_minio 'true');
+--Testcase 8:
+CREATE USER MAPPING FOR public SERVER parquet_s3_svr OPTIONS (user 'minioadmin', password 'minioadmin');
+-- Enable to pushdown aggregate
+SET enable_partitionwise_aggregate TO on;
+-- Turn off leader node participation to avoid duplicate data error when executing
+-- parallel query
+SET parallel_leader_participation TO off;
+-- import foreign schema
+IMPORT FOREIGN SCHEMA "s3://parquets3"
+FROM SERVER parquet_s3_svr
+INTO public
+OPTIONS (sorted 'one');
+--Testcase 9:
+\d
+               List of relations
+ Schema |   Name   |       Type        | Owner 
+--------+----------+-------------------+-------
+ public | ported_1 | foreign table     | pgspider
+ public | ported_2 | foreign table     | pgspider
+ public | ported_3 | foreign table     | pgspider
+ public | test1    | partitioned table | pgspider
+(4 rows)
+
+--Testcase 10:
+SELECT * FROM ported_1;
+     one     |    two     | three |        four         |    five    | six | seven 
+-------------+------------+-------+---------------------+------------+-----+-------
+ -2147483648 | {1,2,3}    | foo   | 2018-01-01 00:00:00 | 1975-06-18 | t   |   0.5
+           0 | {NULL,5,6} | bar   | 2018-01-02 00:00:00 | 1980-01-02 | f   |      
+           1 | {7,8,9}    | baz   | 2018-01-03 00:00:00 | 1999-05-03 | t   |     1
+           2 | {10,11,12} | uno   | 2018-01-04 00:00:00 | 2018-01-04 | f   |   0.5
+(4 rows)
+
+--Testcase 11:
+SELECT * FROM ported_2;
+ one |           two           |   three   |        four         |    five    | six |   seven    
+-----+-------------------------+-----------+---------------------+------------+-----+------------
+   3 | {13,14,15}              | dos       | 2018-01-05 00:00:00 | 2018-01-05 | f   |           
+   4 | {16,17,18}              | tres      | 2018-01-06 00:00:00 | 2018-01-06 | f   |          1
+   5 | {-2147483648,2,9989878} | ~!@#$%^&* | 1970-01-01 23:59:59 | 2018-01-07 | f   | -2266.2468
+(3 rows)
+
+--Testcase 12:
+SELECT * FROM ported_3;
+    one     |           two            |                    three                    |        four         |    five    | six |       seven       
+------------+--------------------------+---------------------------------------------+---------------------+------------+-----+-------------------
+          6 | {-4478,37671,2147483648} | beAty&日本人はとても勤勉で真面目です@@human | 1999-01-01 23:00:59 | 2020-02-20 | t   |          -0.00015
+     100000 | {0,2,1000}               | MANGA&  &ANIME**日本が大好きです* *VIETNAM  | 2049-01-01 00:00:00 | 2100-02-20 | t   |       5464.554455
+ 2147483648 | {-567271,2309,123456789} | love$%^&*J ap  AN                           | 2222-01-01 00:59:59 | 2500-02-20 | f   | 82470548.49874263
+(3 rows)
+
+--Testcase 13:
+CREATE FOREIGN TABLE test1__parquet_s3_svr__0 (
+    one     INT8,
+    two     INT8[],
+    three   TEXT,
+    four    TIMESTAMP,
+    five    DATE,
+    six     BOOL,
+    seven   FLOAT8)
+SERVER parquet_s3_svr
+OPTIONS (filename 's3://parquets3/ported_1.parquet', sorted 'one');
+CREATE FOREIGN TABLE test1_parquet_s3_child0 PARTITION OF test1 FOR VALUES IN ('/parquet_s3_svr_0/') SERVER pgspider_svr OPTIONS(child_name 'test1__parquet_s3_svr__0');
+--Testcase 14:
+SELECT * FROM test1 ORDER BY one;
+     one     |    two     | three |        four         |    five    | six | seven |     __spd_url      
+-------------+------------+-------+---------------------+------------+-----+-------+--------------------
+ -2147483648 | {1,2,3}    | foo   | 2018-01-01 00:00:00 | 1975-06-18 | t   |   0.5 | /parquet_s3_svr_0/
+           0 | {NULL,5,6} | bar   | 2018-01-02 00:00:00 | 1980-01-02 | f   |       | /parquet_s3_svr_0/
+           1 | {7,8,9}    | baz   | 2018-01-03 00:00:00 | 1999-05-03 | t   |     1 | /parquet_s3_svr_0/
+           2 | {10,11,12} | uno   | 2018-01-04 00:00:00 | 2018-01-04 | f   |   0.5 | /parquet_s3_svr_0/
+(4 rows)
+
+--Testcase 15:
+CREATE FOREIGN TABLE test1__parquet_s3_svr__1 (
+    one     INT8,
+    two     INT8[],
+    three   TEXT,
+    four    TIMESTAMP,
+    five    DATE,
+    six     BOOL,
+    seven   FLOAT8)
+SERVER parquet_s3_svr
+OPTIONS (filename 's3://parquets3/ported_2.parquet', sorted 'one');
+CREATE FOREIGN TABLE test1_parquet_s3_child1 PARTITION OF test1 FOR VALUES IN ('/parquet_s3_svr_1/') SERVER pgspider_svr OPTIONS(child_name 'test1__parquet_s3_svr__1');
+--Testcase 16:
+SELECT * FROM test1 ORDER BY one;
+     one     |           two           |   three   |        four         |    five    | six |   seven    |     __spd_url      
+-------------+-------------------------+-----------+---------------------+------------+-----+------------+--------------------
+ -2147483648 | {1,2,3}                 | foo       | 2018-01-01 00:00:00 | 1975-06-18 | t   |        0.5 | /parquet_s3_svr_0/
+           0 | {NULL,5,6}              | bar       | 2018-01-02 00:00:00 | 1980-01-02 | f   |            | /parquet_s3_svr_0/
+           1 | {7,8,9}                 | baz       | 2018-01-03 00:00:00 | 1999-05-03 | t   |          1 | /parquet_s3_svr_0/
+           2 | {10,11,12}              | uno       | 2018-01-04 00:00:00 | 2018-01-04 | f   |        0.5 | /parquet_s3_svr_0/
+           3 | {13,14,15}              | dos       | 2018-01-05 00:00:00 | 2018-01-05 | f   |            | /parquet_s3_svr_1/
+           4 | {16,17,18}              | tres      | 2018-01-06 00:00:00 | 2018-01-06 | f   |          1 | /parquet_s3_svr_1/
+           5 | {-2147483648,2,9989878} | ~!@#$%^&* | 1970-01-01 23:59:59 | 2018-01-07 | f   | -2266.2468 | /parquet_s3_svr_1/
+(7 rows)
+
+--Testcase 17:
+CREATE FOREIGN TABLE test1__parquet_s3_svr__2 (
+    one     INT8,
+    two     INT8[],
+    three   TEXT,
+    four    TIMESTAMP,
+    five    DATE,
+    six     BOOL,
+    seven   FLOAT8)
+SERVER parquet_s3_svr
+OPTIONS (filename 's3://parquets3/ported_3.parquet', sorted 'one');
+CREATE FOREIGN TABLE test1_parquet_s3_child2 PARTITION OF test1 FOR VALUES IN ('/parquet_s3_svr_2/') SERVER pgspider_svr OPTIONS(child_name 'test1__parquet_s3_svr__2');
+--Testcase 18:
+SELECT * FROM test1 ORDER BY one;
+     one     |           two            |                    three                    |        four         |    five    | six |       seven       |     __spd_url      
+-------------+--------------------------+---------------------------------------------+---------------------+------------+-----+-------------------+--------------------
+ -2147483648 | {1,2,3}                  | foo                                         | 2018-01-01 00:00:00 | 1975-06-18 | t   |               0.5 | /parquet_s3_svr_0/
+           0 | {NULL,5,6}               | bar                                         | 2018-01-02 00:00:00 | 1980-01-02 | f   |                   | /parquet_s3_svr_0/
+           1 | {7,8,9}                  | baz                                         | 2018-01-03 00:00:00 | 1999-05-03 | t   |                 1 | /parquet_s3_svr_0/
+           2 | {10,11,12}               | uno                                         | 2018-01-04 00:00:00 | 2018-01-04 | f   |               0.5 | /parquet_s3_svr_0/
+           3 | {13,14,15}               | dos                                         | 2018-01-05 00:00:00 | 2018-01-05 | f   |                   | /parquet_s3_svr_1/
+           4 | {16,17,18}               | tres                                        | 2018-01-06 00:00:00 | 2018-01-06 | f   |                 1 | /parquet_s3_svr_1/
+           5 | {-2147483648,2,9989878}  | ~!@#$%^&*                                   | 1970-01-01 23:59:59 | 2018-01-07 | f   |        -2266.2468 | /parquet_s3_svr_1/
+           6 | {-4478,37671,2147483648} | beAty&日本人はとても勤勉で真面目です@@human | 1999-01-01 23:00:59 | 2020-02-20 | t   |          -0.00015 | /parquet_s3_svr_2/
+      100000 | {0,2,1000}               | MANGA&  &ANIME**日本が大好きです* *VIETNAM  | 2049-01-01 00:00:00 | 2100-02-20 | t   |       5464.554455 | /parquet_s3_svr_2/
+  2147483648 | {-567271,2309,123456789} | love$%^&*J ap  AN                           | 2222-01-01 00:59:59 | 2500-02-20 | f   | 82470548.49874263 | /parquet_s3_svr_2/
+(10 rows)
+
+-- PGSpider Extension does not support IN syntax
+-- --Testcase 19:
+-- SELECT * FROM test1 IN ('/parquet_s3_svr/') ORDER BY three,__spd_url;
+-- import_parquet
+--Testcase 20:
+create function list_parquet_s3_files(args jsonb)
+returns text[] as
+$$
+    select array[args->>'dir' || '/ported_1.parquet', args->>'dir' || '/ported_3.parquet']::text[];
+$$
+language sql;
+--Testcase 21:
+select import_parquet_s3('test1__parquet_s3_svr__3', 'public', 'parquet_s3_svr', 'list_parquet_s3_files', '{"dir": "s3://parquets3"}', '{"sorted": "one"}');
+ import_parquet_s3 
+-------------------
+ 
+(1 row)
+
+CREATE FOREIGN TABLE test1_parquet_s3_child3 PARTITION OF test1 FOR VALUES IN ('/parquet_s3_svr_3/') SERVER pgspider_svr OPTIONS(child_name 'test1__parquet_s3_svr__3');
+--Testcase 22:
+SELECT * FROM test1__parquet_s3_svr__3 ORDER BY one, three;
+     one     |           two            |                    three                    |        four         |    five    | six |       seven       
+-------------+--------------------------+---------------------------------------------+---------------------+------------+-----+-------------------
+ -2147483648 | {1,2,3}                  | foo                                         | 2018-01-01 00:00:00 | 1975-06-18 | t   |               0.5
+           0 | {NULL,5,6}               | bar                                         | 2018-01-02 00:00:00 | 1980-01-02 | f   |                  
+           1 | {7,8,9}                  | baz                                         | 2018-01-03 00:00:00 | 1999-05-03 | t   |                 1
+           2 | {10,11,12}               | uno                                         | 2018-01-04 00:00:00 | 2018-01-04 | f   |               0.5
+           6 | {-4478,37671,2147483648} | beAty&日本人はとても勤勉で真面目です@@human | 1999-01-01 23:00:59 | 2020-02-20 | t   |          -0.00015
+      100000 | {0,2,1000}               | MANGA&  &ANIME**日本が大好きです* *VIETNAM  | 2049-01-01 00:00:00 | 2100-02-20 | t   |       5464.554455
+  2147483648 | {-567271,2309,123456789} | love$%^&*J ap  AN                           | 2222-01-01 00:59:59 | 2500-02-20 | f   | 82470548.49874263
+(7 rows)
+
+--Testcase 23:
+SELECT * FROM test1 ORDER BY one;
+     one     |           two            |                    three                    |        four         |    five    | six |       seven       |     __spd_url      
+-------------+--------------------------+---------------------------------------------+---------------------+------------+-----+-------------------+--------------------
+ -2147483648 | {1,2,3}                  | foo                                         | 2018-01-01 00:00:00 | 1975-06-18 | t   |               0.5 | /parquet_s3_svr_3/
+ -2147483648 | {1,2,3}                  | foo                                         | 2018-01-01 00:00:00 | 1975-06-18 | t   |               0.5 | /parquet_s3_svr_0/
+           0 | {NULL,5,6}               | bar                                         | 2018-01-02 00:00:00 | 1980-01-02 | f   |                   | /parquet_s3_svr_0/
+           0 | {NULL,5,6}               | bar                                         | 2018-01-02 00:00:00 | 1980-01-02 | f   |                   | /parquet_s3_svr_3/
+           1 | {7,8,9}                  | baz                                         | 2018-01-03 00:00:00 | 1999-05-03 | t   |                 1 | /parquet_s3_svr_0/
+           1 | {7,8,9}                  | baz                                         | 2018-01-03 00:00:00 | 1999-05-03 | t   |                 1 | /parquet_s3_svr_3/
+           2 | {10,11,12}               | uno                                         | 2018-01-04 00:00:00 | 2018-01-04 | f   |               0.5 | /parquet_s3_svr_3/
+           2 | {10,11,12}               | uno                                         | 2018-01-04 00:00:00 | 2018-01-04 | f   |               0.5 | /parquet_s3_svr_0/
+           3 | {13,14,15}               | dos                                         | 2018-01-05 00:00:00 | 2018-01-05 | f   |                   | /parquet_s3_svr_1/
+           4 | {16,17,18}               | tres                                        | 2018-01-06 00:00:00 | 2018-01-06 | f   |                 1 | /parquet_s3_svr_1/
+           5 | {-2147483648,2,9989878}  | ~!@#$%^&*                                   | 1970-01-01 23:59:59 | 2018-01-07 | f   |        -2266.2468 | /parquet_s3_svr_1/
+           6 | {-4478,37671,2147483648} | beAty&日本人はとても勤勉で真面目です@@human | 1999-01-01 23:00:59 | 2020-02-20 | t   |          -0.00015 | /parquet_s3_svr_2/
+           6 | {-4478,37671,2147483648} | beAty&日本人はとても勤勉で真面目です@@human | 1999-01-01 23:00:59 | 2020-02-20 | t   |          -0.00015 | /parquet_s3_svr_3/
+      100000 | {0,2,1000}               | MANGA&  &ANIME**日本が大好きです* *VIETNAM  | 2049-01-01 00:00:00 | 2100-02-20 | t   |       5464.554455 | /parquet_s3_svr_2/
+      100000 | {0,2,1000}               | MANGA&  &ANIME**日本が大好きです* *VIETNAM  | 2049-01-01 00:00:00 | 2100-02-20 | t   |       5464.554455 | /parquet_s3_svr_3/
+  2147483648 | {-567271,2309,123456789} | love$%^&*J ap  AN                           | 2222-01-01 00:59:59 | 2500-02-20 | f   | 82470548.49874263 | /parquet_s3_svr_3/
+  2147483648 | {-567271,2309,123456789} | love$%^&*J ap  AN                           | 2222-01-01 00:59:59 | 2500-02-20 | f   | 82470548.49874263 | /parquet_s3_svr_2/
+(17 rows)
+
+--Testcase 24:
+select import_parquet_s3_explicit('test1__parquet_s3_svr__4', 'public', 'parquet_s3_svr', array['one', 'three', 'six'], array['int8', 'text', 'bool']::regtype[], 'list_parquet_s3_files', '{"dir": "s3://parquets3"}', '{"sorted": "one"}');
+ import_parquet_s3_explicit 
+----------------------------
+ 
+(1 row)
+
+CREATE FOREIGN TABLE test1_parquet_s3_child4 PARTITION OF test1 FOR VALUES IN ('/parquet_s3_svr_4/') SERVER pgspider_svr OPTIONS(child_name 'test1__parquet_s3_svr__4');
+--Testcase 25:
+SELECT * FROM test1__parquet_s3_svr__4;
+     one     |                    three                    | six 
+-------------+---------------------------------------------+-----
+ -2147483648 | foo                                         | t
+           0 | bar                                         | f
+           1 | baz                                         | t
+           2 | uno                                         | f
+           6 | beAty&日本人はとても勤勉で真面目です@@human | t
+      100000 | MANGA&  &ANIME**日本が大好きです* *VIETNAM  | t
+  2147483648 | love$%^&*J ap  AN                           | f
+(7 rows)
+
+--PGSpider Extension requires the schema of tables of pgspider_ext and data source fdw must be the same.
+--Therefore, this test case returns error message.
+--Testcase 26:
+SELECT * FROM test1 ORDER BY one;
+ERROR:  Column number 2 "two" of parent table and "three" of child table are mismatched
+--Testcase 27:
+CREATE FOREIGN TABLE parquets3tbl__parquet_s3_svr__0 (
+    one     INT8,
+    two     INT8[],
+    three   TEXT,
+    four    TIMESTAMP,
+    five    DATE,
+    six     BOOL,
+    seven   FLOAT8) 
+SERVER parquet_s3_svr options(filename 's3://parquets3/ported_3.parquet', sorted 'one');
+--Testcase 28:
+SELECT * FROM parquets3tbl__parquet_s3_svr__0;
+    one     |           two            |                    three                    |        four         |    five    | six |       seven       
+------------+--------------------------+---------------------------------------------+---------------------+------------+-----+-------------------
+          6 | {-4478,37671,2147483648} | beAty&日本人はとても勤勉で真面目です@@human | 1999-01-01 23:00:59 | 2020-02-20 | t   |          -0.00015
+     100000 | {0,2,1000}               | MANGA&  &ANIME**日本が大好きです* *VIETNAM  | 2049-01-01 00:00:00 | 2100-02-20 | t   |       5464.554455
+ 2147483648 | {-567271,2309,123456789} | love$%^&*J ap  AN                           | 2222-01-01 00:59:59 | 2500-02-20 | f   | 82470548.49874263
+(3 rows)
+
+--Testcase 29:
+CREATE TABLE parquets3tbl (
+    one     INT8,
+    two     INT8[],
+    three   TEXT,
+    four    TIMESTAMP,
+    five    DATE,
+    six     BOOL,
+    seven   FLOAT8,
+    __spd_url text) 
+ PARTITION BY LIST (__spd_url);
+CREATE FOREIGN TABLE parquets3tbl_parquet_s3_child PARTITION OF parquets3tbl FOR VALUES IN ('/parquet_s3_svr/') SERVER pgspider_svr OPTIONS(child_name 'parquets3tbl__parquet_s3_svr__0');
+--Testcase 30:
+SELECT * FROM parquets3tbl;
+    one     |           two            |                    three                    |        four         |    five    | six |       seven       |    __spd_url     
+------------+--------------------------+---------------------------------------------+---------------------+------------+-----+-------------------+------------------
+          6 | {-4478,37671,2147483648} | beAty&日本人はとても勤勉で真面目です@@human | 1999-01-01 23:00:59 | 2020-02-20 | t   |          -0.00015 | /parquet_s3_svr/
+     100000 | {0,2,1000}               | MANGA&  &ANIME**日本が大好きです* *VIETNAM  | 2049-01-01 00:00:00 | 2100-02-20 | t   |       5464.554455 | /parquet_s3_svr/
+ 2147483648 | {-567271,2309,123456789} | love$%^&*J ap  AN                           | 2222-01-01 00:59:59 | 2500-02-20 | f   | 82470548.49874263 | /parquet_s3_svr/
+(3 rows)
+
+-- PGSpider Extension does not support IN syntax
+-- --Testcase 31:
+-- SELECT * FROM test1 IN ('/parquet_s3_svr/') where one < 1 ORDER BY one;
+--Testcase 32:
+DROP FUNCTION list_parquet_s3_files;
+--Testcase 33:
+DROP EXTENSION parquet_s3_fdw CASCADE;
+--Testcase 34:
+DROP TABLE test1;
+DROP TABLE parquets3tbl;
+--Testcase 35:
+DROP SERVER pgspider_svr CASCADE;
+--Testcase 36:
+DROP EXTENSION pgspider_ext CASCADE;

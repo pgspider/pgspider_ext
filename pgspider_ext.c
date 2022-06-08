@@ -3,7 +3,7 @@
  * pgspider_ext.c
  * contrib/pgspider_ext/pgspider_ext.c
  *
- * Portions Copyright (c) 2020 - 2021, TOSHIBA CORPERATION
+ * Portions Copyright (c) 2020 - 2022, TOSHIBA CORPORATION
  *
  *-------------------------------------------------------------------------
  */
@@ -35,6 +35,7 @@ PG_MODULE_MAGIC;
 #include "parser/parse_clause.h"
 #include "parser/parse_oper.h"
 #include "utils/builtins.h"
+#include "utils/guc.h"
 #include "utils/partcache.h"
 #include "utils/syscache.h"
 #include "storage/lmgr.h"
@@ -43,6 +44,7 @@ PG_MODULE_MAGIC;
 
 
 #define PGSPIDER_FDW_NAME "pgspider_fdw"
+#define PARQUET_S3_FDW_NAME "parquet_s3_fdw"
 
 
 #define createChildPathKey(pathkey, attrno_to_child) \
@@ -251,6 +253,7 @@ child_tableid_from_parentid(Oid foreigntableid)
 	char	   *child_name;
 	SpdPpt	   *option = spd_get_options(foreigntableid);
 	Oid			child_table_oid;
+	bool		change_search_path = false;
 
 	if (option->child_name)
 		child_name = option->child_name;
@@ -263,7 +266,28 @@ child_tableid_from_parentid(Oid foreigntableid)
 		RelationClose(rel);
 	}
 
+	/*
+	 * By default, the search path is "pg_catalog" for remote session.
+	 * Therefore, need to update namespace_search_path to be able to
+	 * search in remote server
+	 */
+	if (strcmp(namespace_search_path, "pg_catalog") == 0)
+	{
+		change_search_path = true;
+		namespace_search_path = "\"$user\", public";
+		assign_search_path("", NULL);
+	}
+
 	child_table_oid = RelnameGetRelid(child_name);
+
+	/*
+	 * Change back the search path to avoid affecting original behavior
+	 */
+	if (change_search_path)
+	{
+		namespace_search_path = "pg_catalog";
+		assign_search_path("", NULL);
+	}
 
 	if (!OidIsValid(child_table_oid))
 		elog(ERROR, "Not found child table: %s", child_name);
@@ -733,6 +757,10 @@ spdGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid)
 	ChildPlanInfo *child_plan_info;
 	ListCell   *lc;
 	int			path_pos = 0;
+	Oid			oid_server;
+	ForeignServer *fs;
+	ForeignDataWrapper *fdw;
+
 
 	elog(DEBUG1, "GetForeignPaths");
 
@@ -740,6 +768,17 @@ spdGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid)
 		elog(ERROR, "fdw_private is NULL");
 
 	child_plan_info = &fdw_private->child_plan_info;
+
+	oid_server = serverid_of_relation(child_plan_info->table_oid);
+	fs = GetForeignServer(oid_server);
+	fdw = GetForeignDataWrapper(fs->fdwid);
+
+	/*
+	 * The ECs need to reached canonical state. Otherwise, pathkeys of
+	 * parquet_s3_fdw could be rendered non-canonical.
+	 */
+	if (strcmp(fdw->fdwname, PARQUET_S3_FDW_NAME) == 0)
+		child_plan_info->root->ec_merging_done = root->ec_merging_done;
 
 	/* Create Foreign paths using base_rel_list to each child node. */
 	child_plan_info->fdw_routine->GetForeignPaths(child_plan_info->root,
@@ -802,20 +841,7 @@ spdGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid)
 			 * equality.
 			 */
 			if (compare_pathkeys(childpath->pathkeys, child_plan_info->root->query_pathkeys) == PATHKEYS_EQUAL)
-			{
 				pathkeys = root->query_pathkeys;
-			}
-			else
-			{
-				ListCell   *cell;
-
-				foreach(cell, childpath->pathkeys)
-				{
-					PathKey    *pathkey = createChildPathKey((PathKey *) lfirst(cell), child_plan_info->attrno_to_parent);
-
-					pathkeys = lappend(pathkeys, pathkey);
-				}
-			}
 		}
 
 		/*
@@ -945,7 +971,7 @@ createChildPlan(PlannerInfo *root, RelOptInfo *baserel, int best_path_pos,
 	List	   *restrictinfo;
 	List	   *idxes = NIL;
 
-	/* Choose athe best path in the list. */
+	/* Choose the best path in the list. */
 	child_path = (Path *) list_nth(child_plan_info->baserel->pathlist, best_path_pos);
 	child_plan_info->path = child_path;
 
@@ -1065,7 +1091,7 @@ spdGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid,
 		 * Determine the position of partition key in a tuple slot and add it
 		 * into fdw_scan_tlist.
 		 */
-		if (fdw_private->partkey_expr)
+		if (fdw_private->partkey_expr || fdw_private->partkey_conds)
 		{
 			if (fdw_scan_tlist)
 			{
@@ -1313,6 +1339,10 @@ spdBeginForeignScan(ForeignScanState *node, int eflags)
 	ForeignScan *fsplan = (ForeignScan *) node->ss.ps.plan;
 	SpdFdwScanState *fdw_state;
 	ChildScanInfo *child_scan_info;
+	EState	   *estate = node->ss.ps.state;
+	Query	   *query;
+	RangeTblEntry *rte;
+	int			k;
 
 	elog(DEBUG1, "BeginForeignScan");
 
@@ -1323,6 +1353,15 @@ spdBeginForeignScan(ForeignScanState *node, int eflags)
 
 	/* Create child's foreign scan state. */
 	child_scan_info->fsstate = createChildFsstate(&node->ss, eflags, child_scan_info);
+
+	/* This should be a new RTE list. coming from dummy rtable */
+	query = child_scan_info->parse;
+
+	rte = lfirst_node(RangeTblEntry, list_head(query->rtable));
+
+	if (query->rtable->length != estate->es_range_table->length)
+		for (k = query->rtable->length; k < estate->es_range_table->length; k++)
+			query->rtable = lappend(query->rtable, rte);
 
 	/* Call BeginForeignScan of child table. */
 	child_scan_info->fdw_routine->BeginForeignScan(child_scan_info->fsstate, eflags);
@@ -1864,10 +1903,7 @@ spdExplainForeignScan(ForeignScanState *node,
 {
 	ChildScanInfo *child_scan_info;
 	SpdFdwScanState *fdw_state;
-	ForeignScan *plan;
-	ForeignScan *child_plan;
-	Bitmapset *fs_relids;
-	Bitmapset *child_fs_relids;
+	ExplainState *child_es;
 
 	elog(DEBUG1, "ExplainForeignScan");
 
@@ -1882,19 +1918,18 @@ spdExplainForeignScan(ForeignScanState *node,
 	es->indent++;
 
 	/*
-	 * Replace child plan's fs_relids by that of parent temporary.
-	 * ToDo: Ideally, pgspider_ext should create child explain state.
+	 * Create child ExplainState before calling child's ExplainForeignScan().
 	 */
-	plan = castNode(ForeignScan, node->ss.ps.plan);
-	child_plan = castNode(ForeignScan, child_scan_info->fsstate->ss.ps.plan);
-	fs_relids = plan->fs_relids;
-	child_fs_relids = child_plan->fs_relids;
-	child_plan->fs_relids = fs_relids;
 
-	child_scan_info->fdw_routine->ExplainForeignScan(child_scan_info->fsstate, es);
+	child_es = NewExplainState();
 
-	child_plan->fs_relids = child_fs_relids;
+	memcpy(child_es, es, sizeof(ExplainState));
+	child_es->rtable = child_scan_info->parse->rtable;
+	
+	/* Call child FDW's ExplainForeignScan(). */
+	child_scan_info->fdw_routine->ExplainForeignScan(child_scan_info->fsstate, child_es);
 
+	pfree(child_es);
 	es->indent--;
 }
 
@@ -1951,7 +1986,6 @@ createChildGroupClause(PlannerInfo *root, AttrNumber *attrno_to_child,
 		Node	   *node;
 		SortGroupClause *child_sgc;
 		TargetEntry *child_te;
-		Expr	   *expr;
 
 		if (te == NULL)
 			return NIL;
@@ -1983,9 +2017,8 @@ createChildGroupClause(PlannerInfo *root, AttrNumber *attrno_to_child,
 
 		child_sgc = (SortGroupClause *) copyObject(sgc);
 		/* Update varattno for mapping from a parent table to a child table. */
-		child_te = get_sortgroupclause_tle(sgc, target_list);
-		expr = (Expr *) copyObject(child_te->expr);
-		child_te->expr = (Expr *) mapVarAttnos((Node *) expr, attrno_to_child);
+		child_te = (TargetEntry *) copyObject(te);
+		child_te->expr = (Expr *) mapVarAttnos((Node *) child_te->expr, attrno_to_child);
 
 		child_group_clause = lappend(child_group_clause, child_sgc);
 	}
@@ -2003,7 +2036,7 @@ createChildGroupClause(PlannerInfo *root, AttrNumber *attrno_to_child,
  * @return bool - true if it can be pushed down.
  */
 static bool
-foreign_grouping_ok(PlannerInfo *root, RelOptInfo *grouped_rel)
+foreign_grouping_ok(PlannerInfo *root, RelOptInfo *grouped_rel, AttrNumber partkey_attno)
 {
 	Query	   *query = root->parse;
 	ListCell   *lc;
@@ -2024,15 +2057,19 @@ foreign_grouping_ok(PlannerInfo *root, RelOptInfo *grouped_rel)
 	{
 		Node	   *node = (Node *) lfirst(lc);
 		Node	   *varnode;
-		bool		shippable = true;
+		AggShippabilityContext ctx;
+
+		ctx.shippable = true;
+		ctx.hasAggref = false;
+		ctx.partkey_attno = partkey_attno;
 
 		if (IsA(node, TargetEntry))
 			varnode = (Node *) (((TargetEntry *) node)->expr);
 		else
 			varnode = node;
 
-		foreign_expr_walker_agg_shippability(varnode, &shippable);
-		if (!shippable)
+		foreign_expr_walker_agg_shippability(varnode, &ctx);
+		if (!ctx.shippable)
 			return false;
 	}
 
@@ -2258,7 +2295,7 @@ spdGetForeignUpperPaths(PlannerInfo *root, UpperRelationKind stage,
 	 * Check whether the aggregation, grouping and having operations can be
 	 * pushed down to the foreign server.
 	 */
-	if (!foreign_grouping_ok(root, output_rel))
+	if (!foreign_grouping_ok(root, output_rel, fdw_private->partkey_attno))
 		return;
 
 	/*
@@ -2268,7 +2305,7 @@ spdGetForeignUpperPaths(PlannerInfo *root, UpperRelationKind stage,
 	child_group_clause = createChildGroupClause(root, child_plan_info->attrno_to_child,
 												fdw_private->partkey_attno, &groupby_has_partkey);
 
-	/* Cannot pushdown GROPU BY using a partition key with calculation. */
+	/* Cannot pushdown GROUP BY using a partition key with calculation. */
 	if (groupby_has_partkey)
 		return;
 
@@ -2296,6 +2333,8 @@ spdGetForeignUpperPaths(PlannerInfo *root, UpperRelationKind stage,
 		List	   *partkey_idxes = NIL;
 		PathTarget *child_reltarget;
 		List	   *exprs = NIL;
+		GroupPathExtraData *ext = (GroupPathExtraData *) extra;
+		bool		change_patype = false;
 
 		child_reltarget = copy_pathtarget(output_rel->reltarget);
 		exprs = copyObject(child_reltarget->exprs);
@@ -2351,13 +2390,34 @@ spdGetForeignUpperPaths(PlannerInfo *root, UpperRelationKind stage,
 									  fdw_private->aggsplit_history);
 
 		/*
+		 * Change kind of partitionwise aggregation (patype).
+		 * FDWs does not push down aggregations if the patype is PARTITIONWISE_AGGREGATE_PARTIAL.
+		 * There is an assert in add_foreign_grouping_paths of FDWs which will raise error when
+		 * we try to push down aggregate function with PARTITIONWISE_AGGREGATE_PARTIAL. Therefore,
+		 * we change it to PARTITIONWISE_AGGREGATE_FULL forcibly to avoid that error.
+		 */
+		if (ext->patype == PARTITIONWISE_AGGREGATE_PARTIAL)
+		{
+			ext->patype = PARTITIONWISE_AGGREGATE_FULL;
+			change_patype = true;
+		}
+
+		/*
 		 * Call GetForeignUpperPaths on UPPERREL_GROUP_AGG stage in order to
 		 * enable to pushdown aggregates in child FDW. Originally, a parent
 		 * GetForeignUpperPaths is called on UPPERREL_PARTIAL_GROUP_AGG stage.
 		 */
 		child_plan_info->fdw_routine->GetForeignUpperPaths(child_root,
 														   UPPERREL_GROUP_AGG, child_input_rel,
-														   child_output_rel, extra);
+														   child_output_rel, ext);
+
+		/*
+		 * After finishes GetForeignUpperPaths of child node, if we have changed patype forcibly
+		 * before, we need to set it back to PARTITIONWISE_AGGREGATE_PARTIAL to avoid wrong code
+		 * flow in PostgreSQL core.
+		 */
+		if (change_patype)
+			ext->patype = PARTITIONWISE_AGGREGATE_PARTIAL;
 	}
 
 	/* Add paths based on child paths. */

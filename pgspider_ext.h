@@ -3,7 +3,7 @@
  * pgspider_ext.c
  * contrib/pgspider_ext/pgspider_ext.h
  *
- * Portions Copyright (c) 2020 - 2021, TOSHIBA CORPERATION
+ * Portions Copyright (c) 2020 - 2022, TOSHIBA CORPORATION
  *
  *-------------------------------------------------------------------------
  */
@@ -46,13 +46,21 @@ typedef struct AggSplitChangeWalkerContext
 	AggSplit	new_aggsplit;
 }			AggSplitChangeWalkerContext;
 
+typedef struct AggShippabilityContext
+{
+	bool			shippable;		/* this flag determine that the expression can be shipped or not */
+	bool			hasAggref;		/* this flag marks that we are checking the Aggref. It will be used
+									 * to detect if partition key is inside Aggref function */
+	AttrNumber		partkey_attno;	/* column number of partition key */
+}			AggShippabilityContext;
+
 /* In pgspider_ext_option.c */
 extern SpdPpt * spd_get_options(Oid foreignoid);
 
 /* In pgspider_ext_deparse.c */
 extern HTAB *aggsplit_history_create(void);
 extern bool foreign_expr_walker_aggsplit_change(Node *node, AggSplitChangeWalkerContext * context);
-extern bool foreign_expr_walker_agg_shippability(Node *node, bool *shippable);
+extern bool foreign_expr_walker_agg_shippability(Node *node, AggShippabilityContext *ctx);
 extern void createVarAttrnoMapping(Oid parent_tableid, Oid child_tableid,
 								   AttrNumber partkey_attno,
 								   AttrNumber **attrno_to_child,

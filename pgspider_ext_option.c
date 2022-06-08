@@ -3,7 +3,7 @@
  * pgspider_ext_option.c
  * contrib/pgspider_ext/pgspider_ext_option.c
  *
- * Portions Copyright (c) 2020 - 2021, TOSHIBA CORPERATION
+ * Portions Copyright (c) 2020 - 2022, TOSHIBA CORPORATION
  *
  *-------------------------------------------------------------------------
  */

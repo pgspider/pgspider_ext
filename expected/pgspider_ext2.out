@@ -152,19 +152,19 @@ EXPLAIN (VERBOSE, COSTS OFF) SELECT sum(i), count(i) FROM test1;
    ->  Append
          ->  Foreign Scan
                Output: (PARTIAL sum(test1.i)), (PARTIAL count(test1.i))
-                 Relations: Aggregate on (public.test1_node1_part test1)
+                 Relations: Aggregate on (public.test1_node1 test1)
                  Remote SQL: SELECT sum(i), count(i) FROM public.test1_node1_src
          ->  Foreign Scan
                Output: (PARTIAL sum(test1_1.i)), (PARTIAL count(test1_1.i))
-                 Relations: Aggregate on (public.test1_node2_part test1_1)
+                 Relations: Aggregate on (public.test1_node2 test1_1)
                  Remote SQL: SELECT sum(i), count(i) FROM public.test1_node2_src
          ->  Foreign Scan
                Output: (PARTIAL sum(test1_2.i)), (PARTIAL count(test1_2.i))
-                 Relations: Aggregate on (public.test1_node3_part test1_2)
+                 Relations: Aggregate on (public.test1_node3 test1_2)
                  Remote SQL: SELECT sum(i), count(i) FROM public.test1_node3_src
          ->  Foreign Scan
                Output: (PARTIAL sum(test1_3.i)), (PARTIAL count(test1_3.i))
-                 Relations: Aggregate on (public.test1_node4_part test1_3)
+                 Relations: Aggregate on (public.test1_node4 test1_3)
                  Remote SQL: SELECT sum(i), count(i) FROM public.test1_node4_src
 (19 rows)
 

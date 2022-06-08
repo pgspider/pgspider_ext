@@ -51,16 +51,16 @@ Usage of PostgreSQL installed pgspider_ext is the same as PostgreSQL. You can us
 
 ## How to install pgspider_ext
 
-The current version can work with PostgreSQL 13.2. 
+The current version can work with PostgreSQL 13.5.
 
 Download PostgreSQL source code.
 <pre>
-https://www.postgresql.org/ftp/source/v13.2/postgresql-13.2.tar.gz
+https://ftp.postgresql.org/pub/source/v13.5/postgresql-13.5.tar.gz
 </pre>
 
 Decompress PostgreSQL source code. 
 <pre>
-tar xvf postgresql-13.2.tar.gz
+tar xvf postgresql-13.5.tar.gz
 </pre>
 
 Download pgspider_ext source code into "contrib/pgspider_ext" directory.
@@ -70,7 +70,11 @@ git clone XXX
 
 Build and install PostgreSQL and pgspider_ext.
 <pre>
+<<<<<<< HEAD
 cd postgresql-13.2
+=======
+cd postgresql-13.5
+>>>>>>> origin/RELEASE_22A
 ./configure
 make
 sudo make install
@@ -198,6 +202,174 @@ SET enable_partitionwise_aggregate TO on;
 We have confirmed that PGSpider can connect to:
 - PostgreSQL ([postgres_fdw](https://github.com/postgres/postgres))
 - MySQL ([mysql_fdw](https://github.com/pgspider/mysql_fdw))
+- DynamoDB ([dynamodb_fdw](https://github.com/pgspider/dynamodb_fdw))
+- GridDB ([griddb_fdw](https://github.com/pgspider/griddb_fdw))
+- JDBC ([jdbc_fdw](https://github.com/pgspider/jdbc_fdw))
+- ODBC ([odbc_fdw](https://github.com/pgspider/odbc_fdw))
+- Parquet S3 ([parquet_s3_fdw](https://github.com/pgspider/parquet_s3_fdw))
+- SQLite ([sqlite_fdw](https://github.com/pgspider/sqlite_fdw))
+- MongoDB ([mongo_fdw](https://github.com/pgspider/mongo_fdw))
+- InfluxDB ([influxdb_fdw](https://github.com/pgspider/influxdb_fdw))
+
+Currently, PostgreSQL has a bug which will cause duplicate data when parallel query is executed.
+It happens when leader node and worker nodes scan the same data.
+We can avoid this bug by disabling leader node from collecting data by executing:
+<pre>
+SET parallel_leader_participation TO off;
+</pre>
+
+## Test execution
+
+PGSpider Extension has several test scripts to execute test for each data source.
+| No | Test script file name | Corresponding test files | Remark |
+| ----------- | ----------- | ----------- | ----------- |
+| 1	| test_dynamodb.sh | ported_dynamodb_fdw.sql | Test for dynamodb_fdw |
+| 2	| test_griddb.sh | ported_griddb_fdw.sql | Test for griddb_fdw |
+| 3	| test_jdbc.sh | ported_jdbc_fdw_griddb.sql<br>ported_jdbc_fdw_mysql.sql<br>ported_jdbc_fdw_postgres.sql| Test for jdbc_fdw |
+| 4	| test_mongodb.sh | ported_mongodb_fdw.sql | Test for mongo_fdw |
+| 5	| test_mysql.sh | ported_mysql_fdw.sql | Test for mysql_fdw |
+| 6	| test_odbc.sh | ported_odbc_fdw_mysql.sql<br>ported_odbc_fdw_postgres.sql| Test for odbc_fdw |
+| 7	| test_parquet_s3_fdw.sh | ported_parquet_s3_fdw_local.sql<br>ported_parquet_s3_fdw_server.sql | Test for parquet_s3_fdw |
+| 8	| test_pgspider_core_fdw_multi.sh | ported_pgspider_core_fdw_multi.sql | Test for pgspider_ext with postgres_fdw in multi-layers |
+| 9	| test_pgspider_core_fdw_parquet_s3.sh | ported_pgspider_core_fdw_import_s3.sql<br>ported_pgspider_core_fdw_parquet_s3_fdw.sql<br>ported_pgspider_core_fdw_parquet_s3_fdw2.sql | Test for pgspider_ext with parquet_s3_fdw, ported from pgspider_core_fdw |
+| 10 | test_pgspider_core_fdw_postgres_fdw.sh | ported_pgspider_core_fdw_postgres_fdw.sql | Test for pgspider_ext with postgres_fdw, ported from pgspider_core_fdw |
+| 11 | test_pgspider_core_fdw.sh | ported_pgspider_core_fdw.sql | Test for pgspider_ext with postgres_fdw in single layer |
+| 12 | test_postgres.sh | pgspider_ext.sql<br>pgspider_ext2<br>pgspider_ext3 | Test for postgres_fdw |
+| 13 | test_sqlite.sh | ported_sqlite_fdw.sql | Test for sqlite_fdw |
+| 14 | test_sqlumdashcs.sh | ported_sqlumdashcs_fdw.sql | Test for sqlumdashcs_fdw |
+| 15 | test_tinybrace.sh | ported_tinybrace_fdw.sql | Test for tinybrace_fdw |
+| 16 | test_influxdb.sh | ported_influxdb_fdw.sql | Test for influxdb_fdw |
+
+User can execute test script to execute test for corresponding data source.
+<pre>
+./test_sqlite.sh
+</pre>
+
+For some test script, user need to update the paths inside test script or specify the environment variable before execution.
+### test_dynamodb.sh
+- Export LD_LIBRARY_PATH to the installed folder of AWS C++ SDK (which contains some libaws library).
+<pre>
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib64
+</pre>
+- Update DYNAMODB_ENDPOINT in sql/init_data/dynamodb_fdw/dynamodb_init.sh if necessary.
+<pre>
+DYNAMODB_ENDPOINT="http://localhost:8000"
+</pre>
+- Make sure the data in sql/parameters/dynamodb_parameters.conf matches with data of data source.
+### test_griddb.sh
+- Download and build GridDB's C Client, rename the folder to griddb and put it into pgspider_ext/sql/init_data/griddb_fdw directory.
+- Export LD_LIBRARY_PATH to the bin folder of GridDB's C Client.
+<pre>
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/jenkins/postgres/postgresql-13.5/contrib/pgspider_ext/sql/init_data/griddb_fdw/griddb/bin
+</pre>
+- Export GRIDDB_HOME to the folder of GridDB server.
+<pre>
+export GRIDDB_HOME=/home/jenkins/src/griddb-4.6.1
+</pre>
+- Make sure the data in sql/parameters/griddb_parameters.conf matches with data of data source.
+### test_jdbc.sh
+- Update paths in sql/init_data/jdbc_fdw/jdbc_mysql_init.sh and sql/init_data/jdbc_fdw/jdbc_postgres_init.sh.
+<pre>
+export PGS_SRC_DIR="/home/jenkins/postgres/postgresql-13.5/"
+
+export PGS_BIN_DIR="/home/jenkins/postgres/postgresql-13.5/PGS"
+export FDW_DIR="/home/jenkins/postgres/postgresql-13.5/contrib/pgspider_ext"
+</pre>
+- Update DB_DRIVERPATH, DB_DATA in sql/parameters/jdbc_griddb_parameters.conf, sql/parameters/jdbc_mysql_parameters.conf and sql/parameters/jdbc_postgres_parameters.conf.
+<pre>
+\set DB_DRIVERPATH	'\'/home/jenkins/src/jdbc/gridstore-jdbc-4.6.0.jar\''
+
+\set DB_DATA		'\'/home/jenkins/postgres/postgresql-13.5/contrib/pgspider_ext/sql/init_data/jdbc_fdw/data'
+</pre>
+- Make sure the data in sql/parameters/jdbc_griddb_parameters.conf, sql/parameters/jdbc_mysql_parameters.conf and sql/parameters/jdbc_postgres_parameters.conf matches with data of data source.
+### test_mongodb.sh
+- Make sure the data in sql/parameters/mongodb_parameters.conf matches with data of data source.
+### test_mysql.sh
+- Make sure the data in sql/parameters/mysql_parameters.conf matches with data of data source.
+- Open test_mysql.sh and executes the command in comment block manually.
+<pre>
+# --connect to mysql with root user
+# mysql -u root -p
+
+# --run below
+# CREATE DATABASE mysql_fdw_post;
+# SET GLOBAL validate_password.policy = LOW;
+# SET GLOBAL validate_password.length = 1;
+# SET GLOBAL validate_password.mixed_case_count = 0;
+# SET GLOBAL validate_password.number_count = 0;
+# SET GLOBAL validate_password.special_char_count = 0;
+# CREATE USER 'edb'@'localhost' IDENTIFIED BY 'edb';
+# GRANT ALL PRIVILEGES ON mysql_fdw_post.* TO 'edb'@'localhost';
+# GRANT SUPER ON *.* TO 'edb'@localhost;
+
+# Set time zone to default time zone of make check PST.
+# SET GLOBAL time_zone = '-8:00';
+# SET GLOBAL log_bin_trust_function_creators = 1;
+# SET GLOBAL local_infile=1;
+</pre>
+### test_odbc.sh
+- Update paths in test_odbc.sh
+<pre>
+export PGS_SRC_DIR="/home/jenkins/release_FDW/postgresql-13.5"
+export PGS_BIN_DIR="/home/jenkins/release_FDW/postgresql-13.5/PGS"
+export ODBC_FDW_DIR="/home/jenkins/release_FDW/postgresql-13.5/contrib/odbc_fdw"
+</pre>
+- Make sure the data in sql/parameters/odbc_mysql_parameters.conf, sql/parameters/odbc_postgres_parameters.conf matches with data of data source.
+### test_parquet_s3_fdw.sh
+- Make sure the data in sql/parameters/parquet_s3_local_parameters.conf, sql/parameters/parquet_s3_server_parameters.conf matches with data of data source.
+### test_pgspider_core_fdw_multi.sh
+- Update paths in sql/init_data/pgspider_core_fdw/pgspider_core_fdw_init_multi.sh file.
+<pre>
+PGS1_DIR=/home/jenkins/postgres/postgresql-13.5/PGS
+PGS2_DIR=/home/jenkins/postgres/postgresql-13.5/PGS
+TINYBRACE_HOME=/usr/local/tinybrace
+POSTGRES_HOME=/home/jenkins/postgres/postgresql-13.5/PGS
+GRIDDB_CLIENT=/home/jenkins/src/griddb
+</pre>
+- Export LD_LIBRARY_PATH to the bin folder of GridDB's C Client and tinybrace library.
+<pre>
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/jenkins/postgres/postgresql-13.5/contrib/pgspider_ext/sql/init_data/griddb_fdw/griddb/bin:/usr/local/tinybrace/lib
+</pre>
+- Export GRIDDB_HOME to the folder of GridDB server.
+<pre>
+export GRIDDB_HOME=/home/jenkins/src/griddb-4.6.1
+</pre>
+### test_pgspider_core_fdw_parquet_s3.sh
+- If do not use docker, comment out the following codes in test_pgspider_core_fdw_parquet_s3.sh
+<pre>
+# comment out these following code if do not use docker
+container_name='minio_server'
+
+if [ ! "$(docker ps -q -f name=^/${container_name}$)" ]; then
+    if [ "$(docker ps -aq -f status=exited -f status=created -f name=^/${container_name}$)" ]; then
+        # cleanup
+        docker rm ${container_name} 
+    fi
+    # run minio container
+   sudo docker run -d --name ${container_name} -it -p 9000:9000 -e "MINIO_ACCESS_KEY=minioadmin" -e "MINIO_SECRET_KEY=minioadmin" -v /tmp/data_s3:/data minio/minio server /data
+fi
+</pre>
+### test_pgspider_core_fdw_postgres_fdw.sh
+- Update path in sql/init_data/pgspider_core_fdw/ported_postgres_setup.sh.
+<pre>
+POSTGRES_HOME=/home/jenkins/postgres/postgresql-13.5/PGS
+</pre>
+### test_pgspider_core_fdw.sh
+- Update paths in sql/init_data/pgspider_core_fdw/pgspider_core_fdw_init.sh.
+<pre>
+TINYBRACE_HOME=/usr/local/tinybrace
+POSTGRES_HOME=/home/jenkins/postgres/postgresql-13.5/PGS
+</pre>
+- Export LD_LIBRARY_PATH to tinybrace library.
+<pre>
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/tinybrace/lib
+</pre>
+### test_sqlumdashcs.sh
+- Make sure the data in sql/parameters/sqlumdashcs_parameters.conf matches with data of data source.
+### test_tinybrace.sh
+- Make sure the data in sql/parameters/tinybrace_parameters.conf matches with data of data source.
+### test_influxdb.sh
+- Make sure the data in sql/parameters/influxdb_parameters.conf matches with data of data source.
 
 ## Contributing
 Opening issues and pull requests on GitHub are welcome.

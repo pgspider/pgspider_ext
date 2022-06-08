@@ -3,7 +3,7 @@
  * pgspider_ext_deparse.c
  * contrib/pgspider_ext/pgspider_ext_deparse.c
  *
- * Portions Copyright (c) 2020 - 2021, TOSHIBA CORPERATION
+ * Portions Copyright (c) 2020 - 2022, TOSHIBA CORPORATION
  *
  *-------------------------------------------------------------------------
  */
@@ -21,17 +21,30 @@
 
 #include "pgspider_ext.h"
 
-static const char *shippableFunctionNames[] =
+/*
+ * The following aggregate functions are not pushed down to child nodes.
+ * - avg, variance, stddev: these functions will give wrong result when pushing
+ * down to child nodes because they requires to calculate on the whole data.
+ * - array_agg, json_agg, jsonb_agg, json_object_agg, jsonb_object_agg: these functions
+ * produce meaningfully different result values depending on the order of the input values.
+ * It is hard to control the order of input value, so we do not push down them.
+ * - string_agg, xmlagg: Logically, if there is no ORDER BY in aggregate function, these
+ * functions can be pushed down to child nodes. For string_agg, it can also be pushed down
+ * when the delimiter is not a constant. However, currently, to make it easier to implement,
+ * we always do not push down them. This point can be improved in the future if necessary.
+ */
+static const char *unshippableFunctionNames[] =
 {
-	"bit_and",
-	"bit_or",
-	"bool_and",
-	"bool_or",
-	"count",
-	"every",
-	"max",
-	"min",
-	"sum"
+	"avg",
+	"variance",
+	"stddev ",
+	"array_agg",
+	"json_agg",
+	"jsonb_agg",
+	"json_object_agg",
+	"jsonb_object_agg",
+	"string_agg",
+	"xmlagg"
 };
 
 /* Hash key is Aggref->location. */
@@ -81,12 +94,12 @@ isShippableFunc(const char *name)
 {
 	int			i;
 
-	for (i = 0; i < sizeof(shippableFunctionNames) / sizeof(*shippableFunctionNames); i++)
+	for (i = 0; i < sizeof(unshippableFunctionNames) / sizeof(*unshippableFunctionNames); i++)
 	{
-		if (strcmp(name, shippableFunctionNames[i]) == 0)
-			return true;
+		if (strcmp(name, unshippableFunctionNames[i]) == 0)
+			return false;
 	}
-	return false;
+	return true;
 }
 
 /*
@@ -99,7 +112,7 @@ isShippableFunc(const char *name)
  *				  Otherwise return false in order to continue traversing.
  */
 bool
-foreign_expr_walker_agg_shippability(Node *node, bool *shippable)
+foreign_expr_walker_agg_shippability(Node *node, AggShippabilityContext *ctx)
 {
 	/* Need do nothing for empty subexpressions */
 	if (node == NULL)
@@ -110,36 +123,68 @@ foreign_expr_walker_agg_shippability(Node *node, bool *shippable)
 		Aggref	   *agg = (Aggref *) node;
 		ListCell   *lc;
 		const char *name;
+		bool		filter_check;
 
 		name = getFunctionName(agg->aggfnoid);
 		if (!isShippableFunc(name))
 		{
-			*shippable = false;
+			ctx->shippable = false;
 			return false;
 		}
+
+		/*
+		 * When the aggsplit is AGGSPLIT_INITIAL_SERIAL and aggtranstype is INTERNALOID
+		 * (For example, when the column is bigint and we want to get sum of that column),
+		 * the PostgreSQL core will change the aggtype to bytea. When pushing down on
+		 * pgspider_ext, we need to convert the data returned from fdw to bytea. However,
+		 * currently, there is no way to convert it in pgspider_ext. Therefore, do not
+		 * push down this case.
+		 */
+		if (agg->aggsplit == AGGSPLIT_INITIAL_SERIAL && agg->aggtranstype == INTERNALOID)
+		{
+			ctx->shippable = false;
+			return false;
+		}
+
+		/* Set the flag if detected Aggref function */
+		ctx->hasAggref = true;
 
 		/* Recurse to input args. */
 		foreach(lc, agg->args)
 		{
 			Node	   *n = (Node *) lfirst(lc);
 
-			/* If TargetEntry, extract the expression from it */
-			if (IsA(n, TargetEntry))
+			if (!expression_tree_walker(n, foreign_expr_walker_agg_shippability, ctx))
 			{
-				TargetEntry *tle = (TargetEntry *) n;
-
-				n = (Node *) tle->expr;
-			}
-
-			if (!expression_tree_walker(n, foreign_expr_walker_agg_shippability, shippable))
+				/* Reset the flag for next recursive check */
+				ctx->hasAggref = false;
 				return false;
+			}
 		}
 
 		/* Check aggregate filter */
-		return expression_tree_walker((Node *) agg->aggfilter, foreign_expr_walker_agg_shippability, shippable);
+		filter_check = expression_tree_walker((Node *) agg->aggfilter, foreign_expr_walker_agg_shippability, ctx);
+
+		/* Reset the flag for next recursive check */
+		ctx->hasAggref = false;
+
+		return filter_check;
+	}
+	else if (nodeTag(node) == T_Var)
+	{
+		Var		   *var = (Var *) node;
+
+		/* Don't pushed down __spd_url if it is inside Aggref */
+		if (ctx->hasAggref && var_is_partkey(var, ctx->partkey_attno))
+		{
+			ctx->shippable = false;
+			return false;
+		}
+		else
+			return true;
 	}
 	else
-		return expression_tree_walker(node, foreign_expr_walker_agg_shippability, shippable);
+		return expression_tree_walker(node, foreign_expr_walker_agg_shippability, ctx);
 }
 
 /*
@@ -176,6 +221,7 @@ createVarAttrnoMapping(Oid parent_tableid, Oid child_tableid, AttrNumber partkey
 {
 	AttrNumber	i,
 				j = 1;
+	AttrNumber	i_col = 1;
 	Relation	parent_rel = RelationIdGetRelation(parent_tableid);
 	Relation	child_rel = RelationIdGetRelation(child_tableid);
 	TupleDesc	parent_tupdesc = RelationGetDescr(parent_rel);
@@ -183,13 +229,11 @@ createVarAttrnoMapping(Oid parent_tableid, Oid child_tableid, AttrNumber partkey
 	bool		nodropped = true;
 	AttrNumber *tochild = NULL;
 	AttrNumber *toparent = NULL;
+	int			parent_dropped_col_num = 0;
 
 	/* +1 means a space for partition key column. */
 	tochild = (AttrNumber *) palloc0(sizeof(AttrNumber) * parent_tupdesc->natts + 1);
 	toparent = (AttrNumber *) palloc0(sizeof(AttrNumber) * parent_tupdesc->natts + 1);
-
-	if (partkey_attno != parent_tupdesc->natts)
-		elog(ERROR, "Partition key must be the last column");
 
 	for (i = 1; i < parent_tupdesc->natts; i++)
 	{
@@ -200,6 +244,7 @@ createVarAttrnoMapping(Oid parent_tableid, Oid child_tableid, AttrNumber partkey
 		if (parent_attr->attisdropped)
 		{
 			nodropped = false;
+			parent_dropped_col_num++;
 			continue;
 		}
 
@@ -217,8 +262,8 @@ createVarAttrnoMapping(Oid parent_tableid, Oid child_tableid, AttrNumber partkey
 			child_colname = NameStr(child_attr->attname);
 
 			if (strcmp(parent_colname, child_colname) != 0)
-				elog(ERROR, "Column name is mismatched. %d:%s on parent vs %d:%s on child",
-					 i, parent_colname, j, child_colname);
+				elog(ERROR, "Column number %d \"%s\" of parent table and \"%s\" of child table are mismatched",
+					 i_col, parent_colname, child_colname);
 
 			tochild[i - 1] = j - i;
 			toparent[j - 1] = i - j;
@@ -226,8 +271,13 @@ createVarAttrnoMapping(Oid parent_tableid, Oid child_tableid, AttrNumber partkey
 		}
 
 		if (!found)
-			elog(ERROR, "Column %s is not found in chaild table", parent_colname);
+			elog(ERROR, "Column %s is not found in child table", parent_colname);
+
+		i_col++;
 	}
+
+	if (partkey_attno != parent_tupdesc->natts - parent_dropped_col_num)
+		elog(ERROR, "Partition key must be the last column");
 
 	RelationClose(parent_rel);
 	RelationClose(child_rel);
@@ -335,7 +385,6 @@ removePartkeyFromTargets(List *exprs, AttrNumber partkey_attno,
 	int			i = 0;
 
 	*partkey_idxes = NIL;
-	/* Cannot use foreach because we modify exprs in the loop */
 	foreach(lc, exprs)
 	{
 		Node	   *node = (Node *) lfirst(lc);
@@ -357,7 +406,9 @@ removePartkeyFromTargets(List *exprs, AttrNumber partkey_attno,
 			if (var->varattno == partkey_attno)
 			{
 				*partkey_idxes = lappend(*partkey_idxes, makeInteger(i));
-				exprs = list_delete_ptr(exprs, node);
+				exprs = foreach_delete_current(exprs, lc);
+				if (list_length(exprs) == 0)
+					break;
 			}
 		}
 		i++;
