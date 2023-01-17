@@ -1,4 +1,4 @@
-POSTGRES_HOME=/home/jenkins/postgres/postgresql-13.5/PGS
+POSTGRES_HOME=/home/jenkins/postgres/postgresql-15beta2/PGS
 HOME_DIR=$(pwd)
 
 # Install postgres_fdw extension

@@ -1,7 +1,7 @@
 pgspider_ext is an extension to construct High-Performance SQL Cluster Engine
 for distributed big data.
 
-Copyright (c) 2020 - 2022, TOSHIBA Corporation
+Copyright (c) 2020, TOSHIBA Corporation
 
 Permission to use, copy, modify, and distribute this software and its
 documentation for any purpose, without fee, and without a written agreement is

@@ -1,8 +1,8 @@
 #!/bin/sh
 export PDB_PORT="15432"
 export PDB_NAME="postgres_jdbc"
-export PGS_BIN_DIR="/home/jenkins/postgres/postgresql-13.5/PGS"
-export FDW_DIR="/home/jenkins/postgres/postgresql-13.5/contrib/pgspider_ext"
+export PGS_BIN_DIR="/home/jenkins/postgres/postgresql-15beta2/PGS"
+export FDW_DIR="/home/jenkins/postgres/postgresql-15beta2/contrib/pgspider_ext"
 
 cd $PGS_BIN_DIR/bin
 
