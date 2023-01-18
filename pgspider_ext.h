@@ -3,7 +3,7 @@
  * pgspider_ext.c
  * contrib/pgspider_ext/pgspider_ext.h
  *
- * Portions Copyright (c) 2020 - 2022, TOSHIBA CORPORATION
+ * Portions Copyright (c) 2020, TOSHIBA CORPORATION
  *
  *-------------------------------------------------------------------------
  */
@@ -12,6 +12,8 @@
 
 #include "nodes/pathnodes.h"
 #include "nodes/pg_list.h"
+
+#define CODE_VERSION   10100
 
 /*
  * Options structure to store information.

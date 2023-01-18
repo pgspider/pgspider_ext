@@ -3,7 +3,7 @@
  * pgspider_ext_deparse.c
  * contrib/pgspider_ext/pgspider_ext_deparse.c
  *
- * Portions Copyright (c) 2020 - 2022, TOSHIBA CORPORATION
+ * Portions Copyright (c) 2020, TOSHIBA CORPORATION
  *
  *-------------------------------------------------------------------------
  */
@@ -537,7 +537,11 @@ aggsplit_history_create(void)
 	MemSet(&ctl, 0, sizeof(ctl));
 	ctl.keysize = sizeof(AggSplitHashKey);
 	ctl.entrysize = sizeof(AggSplitHashEntry);
+#if (PG_VERSION_NUM >= 150000)
+	agg_hash = hash_create("pgspider_ext aggrefs", 8, &ctl, HASH_ELEM | HASH_BLOBS);
+#else
 	agg_hash = hash_create("pgspider_ext aggrefs", 8, &ctl, HASH_ELEM);
+#endif
 
 	return agg_hash;
 }

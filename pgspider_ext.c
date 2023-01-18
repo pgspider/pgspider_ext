@@ -3,7 +3,7 @@
  * pgspider_ext.c
  * contrib/pgspider_ext/pgspider_ext.c
  *
- * Portions Copyright (c) 2020 - 2022, TOSHIBA CORPORATION
+ * Portions Copyright (c) 2020, TOSHIBA CORPORATION
  *
  *-------------------------------------------------------------------------
  */
@@ -141,7 +141,12 @@ static void spdBeginForeignScan(ForeignScanState *node, int eflags);
 static TupleTableSlot *spdIterateForeignScan(ForeignScanState *node);
 static void spdReScanForeignScan(ForeignScanState *node);
 static void spdEndForeignScan(ForeignScanState *node);
+#if (PG_VERSION_NUM >= 150000)
+static void spdAddForeignUpdateTargets(PlannerInfo *root,
+						   			   Index rtindex,
+#else
 static void spdAddForeignUpdateTargets(Query *parsetree,
+#endif
 									   RangeTblEntry *target_rte,
 									   Relation target_relation);
 static List *spdPlanForeignModify(PlannerInfo *root,
@@ -178,6 +183,7 @@ static bool spdIsForeignScanParallelSafe(PlannerInfo *root,
 
 /* Declarations for dynamic loading */
 PG_FUNCTION_INFO_V1(pgspider_ext_handler);
+PG_FUNCTION_INFO_V1(pgspider_ext_version);
 
 /*
  * pgspider_ext_handler populates an FdwRoutine with pointers to the functions
@@ -236,6 +242,12 @@ pgspider_ext_handler(PG_FUNCTION_ARGS)
 	routine->IsForeignScanParallelSafe = spdIsForeignScanParallelSafe;
 
 	PG_RETURN_POINTER(routine);
+}
+
+Datum
+pgspider_ext_version(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_INT32(CODE_VERSION);
 }
 
 /*
@@ -670,7 +682,11 @@ getPartColumnAttno(Oid foreigntableid)
 	int			num_dropped = 0;
 
 	/* Get a partion parent table. */
+#if (PG_VERSION_NUM >= 150000)
+	parentid = get_partition_parent(foreigntableid, false);
+#else
 	parentid = get_partition_parent(foreigntableid);
+#endif
 	relation = RelationIdGetRelation(parentid);
 
 	/* Get a partion key information. */
@@ -1298,7 +1314,7 @@ createChildFsstate(ScanState *ss, int eflags, ChildScanInfo * childscaninfo)
 	Relation	rd;
 
 	child_fsstate = makeNode(ForeignScanState);
-	memcpy(&child_fsstate->ss, &ss, sizeof(ScanState));
+	memcpy(&child_fsstate->ss, ss, sizeof(ScanState));
 
 	child_fsstate->ss.ps.plan = childscaninfo->plan;
 
@@ -1716,7 +1732,8 @@ spdReScanForeignScan(ForeignScanState *node)
 	fdw_state->is_first = true;
 
 	child_scan_info = &fdw_state->child_scan_info;
-
+	/* Need to update chgParam to notify child node to change binding params */
+	child_scan_info->fsstate->ss.ps.chgParam = bms_copy(node->ss.ps.chgParam);
 	child_scan_info->fdw_routine->ReScanForeignScan(child_scan_info->fsstate);
 }
 
@@ -1752,12 +1769,18 @@ spdEndForeignScan(ForeignScanState *node)
  * list.
  * Checking IN clause. In currently, must use IN.
  *
- * @param[in] Query *parsetree,
+ * @param[in] PlannerInfo *root 
+ * @param[in] Index *rtindex
  * @param[in] RangeTblEntry *target_rte
  * @param[in] Relation target_relation
  */
 static void
+#if (PG_VERSION_NUM >= 150000)
+spdAddForeignUpdateTargets(PlannerInfo *root,
+						   Index rtindex,
+#else
 spdAddForeignUpdateTargets(Query *parsetree,
+#endif
 						   RangeTblEntry *target_rte,
 						   Relation target_relation)
 {
@@ -2464,5 +2487,11 @@ spdGetForeignUpperPaths(PlannerInfo *root, UpperRelationKind stage,
 static bool
 spdIsForeignScanParallelSafe(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte)
 {
+	/* Plan nodes that reference a correlated SubPlan is always parallel restricted. 
+	 * Therefore, return false when there is lateral join.
+	 */
+	if (rel->lateral_relids)
+		return false;
+
 	return true;
 }

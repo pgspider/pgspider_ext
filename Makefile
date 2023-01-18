@@ -26,6 +26,9 @@ include $(top_builddir)/src/Makefile.global
 include $(top_srcdir)/contrib/contrib-global.mk
 endif
 
+REGRESS := $(addprefix $(VERSION)/,$(REGRESS))
+$(shell mkdir -p results/$(VERSION))
+
 check: temp-install
 
 temp-install: EXTRA_INSTALL=contrib/postgres_fdw contrib/pgspider_ext
