@@ -326,4 +326,12 @@ CREATE TABLE import_source.t4_part PARTITION OF import_source.t4
 
 CREATE TYPE "Colors" AS ENUM ('red', 'green', 'blue');
 
+
+-- ===================================================================
+--  test parallel commit and parallel abort
+-- ===================================================================
+CREATE TABLE ploc1 (f1 int, f2 text);
+CREATE TABLE ploc2 (f1 int, f2 text);
+CREATE TABLE analyze_table (id int, a text, b bigint);
+
 \q

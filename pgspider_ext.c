@@ -26,6 +26,7 @@ PG_MODULE_MAGIC;
 #include "nodes/nodeFuncs.h"
 #include "nodes/pg_list.h"
 #include "nodes/makefuncs.h"
+#include "miscadmin.h"
 #include "optimizer/cost.h"
 #include "optimizer/pathnode.h"
 #include "optimizer/paths.h"
@@ -34,8 +35,15 @@ PG_MODULE_MAGIC;
 #include "optimizer/tlist.h"
 #include "parser/parse_clause.h"
 #include "parser/parse_oper.h"
+#if PG_VERSION_NUM >= 160000
+#include "parser/parse_relation.h"
+#endif
 #include "utils/builtins.h"
+#if PG_VERSION_NUM >= 160000
+#include "utils/guc_hooks.h"
+#else
 #include "utils/guc.h"
+#endif
 #include "utils/partcache.h"
 #include "utils/syscache.h"
 #include "storage/lmgr.h"
@@ -143,7 +151,7 @@ static void spdReScanForeignScan(ForeignScanState *node);
 static void spdEndForeignScan(ForeignScanState *node);
 #if (PG_VERSION_NUM >= 150000)
 static void spdAddForeignUpdateTargets(PlannerInfo *root,
-						   			   Index rtindex,
+									   Index rtindex,
 #else
 static void spdAddForeignUpdateTargets(Query *parsetree,
 #endif
@@ -260,10 +268,10 @@ pgspider_ext_version(PG_FUNCTION_ARGS)
  * @return Oid - child's table oid
  */
 static Oid
-child_tableid_from_parentid(Oid foreigntableid)
+child_tableid_from_parentid(Oid userid, Oid foreigntableid)
 {
 	char	   *child_name;
-	SpdPpt	   *option = spd_get_options(foreigntableid);
+	SpdOpt	   *option = spd_get_options(userid, foreigntableid);
 	Oid			child_table_oid;
 	bool		change_search_path = false;
 
@@ -280,8 +288,8 @@ child_tableid_from_parentid(Oid foreigntableid)
 
 	/*
 	 * By default, the search path is "pg_catalog" for remote session.
-	 * Therefore, need to update namespace_search_path to be able to
-	 * search in remote server
+	 * Therefore, need to update namespace_search_path to be able to search in
+	 * remote server
 	 */
 	if (strcmp(namespace_search_path, "pg_catalog") == 0)
 	{
@@ -467,6 +475,11 @@ createChildRoot(PlannerInfo *root, RelOptInfo *baserel, Oid tableid,
 		query->rtable = lappend(query->rtable, rte);
 	}
 
+#if PG_VERSION_NUM >= 160000
+	/* Create RTEPermissionInfo */
+	addRTEPermissionInfo(&query->rteperminfos, rte);
+#endif
+
 	child_root = makeNode(PlannerInfo);
 	child_root->parse = query;
 	child_root->glob = makeNode(PlannerGlobal);
@@ -474,6 +487,10 @@ createChildRoot(PlannerInfo *root, RelOptInfo *baserel, Oid tableid,
 	child_root->planner_cxt = CurrentMemoryContext;
 	child_root->wt_param_id = -1;
 	child_root->rowMarks = (List *) copyObject(root->rowMarks);
+#if PG_VERSION_NUM >= 160000
+	/* Copy JoinDomain list */
+	child_root->join_domains = root->join_domains;
+#endif
 
 	/*
 	 * Check whether ORDER BY clause uses a partition key. If it is used, we
@@ -635,9 +652,20 @@ getForeignRelSizeChild(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntablei
 	RelOptInfo *child_baserel;
 	AttrNumber *attrno_to_child;
 	AttrNumber *attrno_to_parent;
-
+	Oid			userid;
+#if PG_VERSION_NUM >= 160000
+	/*
+	 * If the table or the server is configured to use remote estimates,
+	 * identify which user to do remote access as during planning.  This
+	 * should match what ExecCheckPermissions() does.  If we fail due to lack
+	 * of permissions, the query would have failed at runtime anyway.
+	 */
+	userid = OidIsValid(baserel->userid) ? baserel->userid : GetUserId();
+#else
+	userid = GetUserId();
+#endif
 	/* Find an oid of child table. */
-	child_table_oid = child_tableid_from_parentid(foreigntableid);
+	child_table_oid = child_tableid_from_parentid(userid, foreigntableid);
 
 	/* Find a child FDW routine. */
 	child_server_oid = serverid_of_relation(child_table_oid);
@@ -1022,6 +1050,17 @@ createChildPlan(PlannerInfo *root, RelOptInfo *baserel, int best_path_pos,
 	else
 		child_plan->fs_relids = ((ForeignPath *) child_path)->path.parent->relids;
 
+#if PG_VERSION_NUM >= 160000
+
+	/*
+	 * Join relid sets include relevant outer joins, but FDWs may need to know
+	 * which are the included base rels.  That's a bit tedious to get without
+	 * access to the plan-time data structures, so compute it here.
+	 */
+	child_plan->fs_base_relids = bms_difference(child_plan->fs_relids,
+												root->outer_join_rels);
+#endif
+
 	return child_plan;
 }
 
@@ -1237,7 +1276,11 @@ spdGetForeignPlan(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid,
  * @return EState* - created execution state
  */
 static EState *
-createChildEstate(EState *estate, int eflags, ChildScanInfo * childscaninfo)
+createChildEstate(EState *estate, int eflags, ChildScanInfo * childscaninfo
+#if PG_VERSION_NUM >= 160000
+				  ,List *permInfos
+#endif
+)
 {
 	EState	   *child_estate;
 	Query	   *query = childscaninfo->parse;
@@ -1253,7 +1296,12 @@ createChildEstate(EState *estate, int eflags, ChildScanInfo * childscaninfo)
 	 * Init range table, in which we use range table array for exec_rt_fetch()
 	 * because it is faster than rt_fetch().
 	 */
+#if PG_VERSION_NUM >= 160000
+	ExecInitRangeTable(child_estate, query->rtable, permInfos);
+#else
 	ExecInitRangeTable(child_estate, query->rtable);
+#endif
+
 	child_estate->es_plannedstmt = (PlannedStmt *) copyObject(estate->es_plannedstmt);
 	child_estate->es_plannedstmt->planTree = (Plan *) copyObject(childscaninfo->plan);
 
@@ -1306,7 +1354,11 @@ createChildTupleTableSlot(ScanState *child_ss)
  * @return EState* - created foreign scan state
  */
 static ForeignScanState *
-createChildFsstate(ScanState *ss, int eflags, ChildScanInfo * childscaninfo)
+createChildFsstate(ScanState *ss, int eflags, ChildScanInfo * childscaninfo
+#if PG_VERSION_NUM >= 160000
+				   ,List *permInfos
+#endif
+)
 {
 	ForeignScanState *child_fsstate;
 	EState	   *estate = ss->ps.state;
@@ -1319,7 +1371,11 @@ createChildFsstate(ScanState *ss, int eflags, ChildScanInfo * childscaninfo)
 	child_fsstate->ss.ps.plan = childscaninfo->plan;
 
 	/* Create Estate */
+#if PG_VERSION_NUM >= 160000
+	child_estate = createChildEstate(estate, eflags, childscaninfo, permInfos);
+#else
 	child_estate = createChildEstate(estate, eflags, childscaninfo);
+#endif
 	ExecAssignExprContext(child_estate, &child_fsstate->ss.ps);
 	child_fsstate->ss.ps.state = child_estate;
 
@@ -1367,13 +1423,17 @@ spdBeginForeignScan(ForeignScanState *node, int eflags)
 
 	child_scan_info = &fdw_state->child_scan_info;
 
-	/* Create child's foreign scan state. */
-	child_scan_info->fsstate = createChildFsstate(&node->ss, eflags, child_scan_info);
-
 	/* This should be a new RTE list. coming from dummy rtable */
 	query = child_scan_info->parse;
 
 	rte = lfirst_node(RangeTblEntry, list_head(query->rtable));
+
+	/* Create child's foreign scan state. */
+#if PG_VERSION_NUM >= 160000
+	child_scan_info->fsstate = createChildFsstate(&node->ss, eflags, child_scan_info, query->rteperminfos);
+#else
+	child_scan_info->fsstate = createChildFsstate(&node->ss, eflags, child_scan_info);
+#endif
 
 	if (query->rtable->length != estate->es_range_table->length)
 		for (k = query->rtable->length; k < estate->es_range_table->length; k++)
@@ -1769,15 +1829,15 @@ spdEndForeignScan(ForeignScanState *node)
  * list.
  * Checking IN clause. In currently, must use IN.
  *
- * @param[in] PlannerInfo *root 
+ * @param[in] PlannerInfo *root
  * @param[in] Index *rtindex
  * @param[in] RangeTblEntry *target_rte
  * @param[in] Relation target_relation
  */
 static void
 #if (PG_VERSION_NUM >= 150000)
-spdAddForeignUpdateTargets(PlannerInfo *root,
-						   Index rtindex,
+			spdAddForeignUpdateTargets(PlannerInfo *root,
+									   Index rtindex,
 #else
 spdAddForeignUpdateTargets(Query *parsetree,
 #endif
@@ -1948,7 +2008,7 @@ spdExplainForeignScan(ForeignScanState *node,
 
 	memcpy(child_es, es, sizeof(ExplainState));
 	child_es->rtable = child_scan_info->parse->rtable;
-	
+
 	/* Call child FDW's ExplainForeignScan(). */
 	child_scan_info->fdw_routine->ExplainForeignScan(child_scan_info->fsstate, child_es);
 
@@ -1996,9 +2056,15 @@ createChildGroupClause(PlannerInfo *root, AttrNumber *attrno_to_child,
 					   AttrNumber partkey_attno, bool *has_partkey)
 {
 	List	   *target_list = root->parse->targetList;
-	List	   *group_clause = root->parse->groupClause;
+	List	   *group_clause;
 	ListCell   *lc;
 	List	   *child_group_clause = NIL;
+
+#if PG_VERSION_NUM >= 160000
+	group_clause = root->processed_groupClause;
+#else
+	group_clause = root->parse->groupClause;
+#endif
 
 	*has_partkey = false;
 
@@ -2338,6 +2404,9 @@ spdGetForeignUpperPaths(PlannerInfo *root, UpperRelationKind stage,
 	child_root = child_plan_info->root;
 
 	child_root->parse->groupClause = child_group_clause;
+#if PG_VERSION_NUM >= 160000
+	child_root->processed_groupClause = child_group_clause;
+#endif
 	child_root->parse->hasAggs = root->parse->hasAggs;
 
 	/* Make pathtarget */
@@ -2374,7 +2443,6 @@ spdGetForeignUpperPaths(PlannerInfo *root, UpperRelationKind stage,
 		if (list_length(partkey_idxes) > 0)
 		{
 			Index	   *sgrefs = child_reltarget->sortgrouprefs;
-			ListCell   *lc;
 			int			count = 0;	/* Removed count. */
 
 			/*
@@ -2413,11 +2481,13 @@ spdGetForeignUpperPaths(PlannerInfo *root, UpperRelationKind stage,
 									  fdw_private->aggsplit_history);
 
 		/*
-		 * Change kind of partitionwise aggregation (patype).
-		 * FDWs does not push down aggregations if the patype is PARTITIONWISE_AGGREGATE_PARTIAL.
-		 * There is an assert in add_foreign_grouping_paths of FDWs which will raise error when
-		 * we try to push down aggregate function with PARTITIONWISE_AGGREGATE_PARTIAL. Therefore,
-		 * we change it to PARTITIONWISE_AGGREGATE_FULL forcibly to avoid that error.
+		 * Change kind of partitionwise aggregation (patype). FDWs does not
+		 * push down aggregations if the patype is
+		 * PARTITIONWISE_AGGREGATE_PARTIAL. There is an assert in
+		 * add_foreign_grouping_paths of FDWs which will raise error when we
+		 * try to push down aggregate function with
+		 * PARTITIONWISE_AGGREGATE_PARTIAL. Therefore, we change it to
+		 * PARTITIONWISE_AGGREGATE_FULL forcibly to avoid that error.
 		 */
 		if (ext->patype == PARTITIONWISE_AGGREGATE_PARTIAL)
 		{
@@ -2435,9 +2505,10 @@ spdGetForeignUpperPaths(PlannerInfo *root, UpperRelationKind stage,
 														   child_output_rel, ext);
 
 		/*
-		 * After finishes GetForeignUpperPaths of child node, if we have changed patype forcibly
-		 * before, we need to set it back to PARTITIONWISE_AGGREGATE_PARTIAL to avoid wrong code
-		 * flow in PostgreSQL core.
+		 * After finishes GetForeignUpperPaths of child node, if we have
+		 * changed patype forcibly before, we need to set it back to
+		 * PARTITIONWISE_AGGREGATE_PARTIAL to avoid wrong code flow in
+		 * PostgreSQL core.
 		 */
 		if (change_patype)
 			ext->patype = PARTITIONWISE_AGGREGATE_PARTIAL;
@@ -2447,7 +2518,7 @@ spdGetForeignUpperPaths(PlannerInfo *root, UpperRelationKind stage,
 	foreach(lc, child_output_rel->pathlist)
 	{
 		Path	   *child_path = (Path *) lfirst(lc);
-		ListCell   *lc;
+		ListCell   *expr_lc;
 		PathTarget *grouping_target = output_rel->reltarget;
 
 		child_plan_info->grouped_root_local = child_root;
@@ -2458,9 +2529,9 @@ spdGetForeignUpperPaths(PlannerInfo *root, UpperRelationKind stage,
 		 * for creating a scanning target list of pgspider.
 		 */
 		fdw_private->partkey_expr = NULL;
-		foreach(lc, grouping_target->exprs)
+		foreach(expr_lc, grouping_target->exprs)
 		{
-			Node	   *node = (Node *) lfirst(lc);
+			Node	   *node = (Node *) lfirst(expr_lc);
 
 			if (IsA(node, Var) && var_is_partkey((Var *) node, fdw_private->partkey_attno))
 			{
@@ -2487,8 +2558,9 @@ spdGetForeignUpperPaths(PlannerInfo *root, UpperRelationKind stage,
 static bool
 spdIsForeignScanParallelSafe(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte)
 {
-	/* Plan nodes that reference a correlated SubPlan is always parallel restricted. 
-	 * Therefore, return false when there is lateral join.
+	/*
+	 * Plan nodes that reference a correlated SubPlan is always parallel
+	 * restricted. Therefore, return false when there is lateral join.
 	 */
 	if (rel->lateral_relids)
 		return false;

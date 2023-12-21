@@ -7,9 +7,9 @@ MYSQL_DB_NAME="odbc_fdw_regress"
 export PDB_PORT="5444"
 export PDB_NAME="odbc_fdw_post"
 export MYSQL_PWD="Mysql_1234"
-export PGS_SRC_DIR="/home/jenkins/release_FDW/postgresql-15beta2"
-export PGS_BIN_DIR="/home/jenkins/release_FDW/postgresql-15beta2/PGS"
-export ODBC_FDW_DIR="/home/jenkins/release_FDW/postgresql-15beta2/contrib/odbc_fdw"
+export PGS_SRC_DIR="/home/jenkins/release_FDW/postgresql-16.0"
+export PGS_BIN_DIR="/home/jenkins/release_FDW/postgresql-16.0/PGS"
+export ODBC_FDW_DIR="/home/jenkins/release_FDW/postgresql-16.0/contrib/odbc_fdw"
 
 CURR_PATH=$(pwd)
 
