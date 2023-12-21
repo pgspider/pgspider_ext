@@ -4,7 +4,7 @@ MYSQL_HOST="localhost"
 MYSQL_PORT="3306"
 MYSQL_USER_NAME="root"
 MYSQL_DB_NAME="mysql_jdbc"
-export PGS_SRC_DIR="/home/jenkins/postgres/postgresql-15beta2/"
+export PGS_SRC_DIR="/home/jenkins/postgres/postgresql-16.0/"
 
 # Below commands must be run first time to create mysql_jdbc
 # --connect to mysql with root user

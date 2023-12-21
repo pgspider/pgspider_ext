@@ -1,5 +1,5 @@
 rm -rf make_check.out || true
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$(pwd)/sql/init_data/griddb/bin/
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$(pwd)/sql/init_data/griddb_fdw/griddb/bin/
 cd sql/init_data/griddb_fdw
 chmod +x ./*.sh || true
 ./init.sh

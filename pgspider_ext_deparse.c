@@ -112,7 +112,7 @@ isShippableFunc(const char *name)
  *				  Otherwise return false in order to continue traversing.
  */
 bool
-foreign_expr_walker_agg_shippability(Node *node, AggShippabilityContext *ctx)
+foreign_expr_walker_agg_shippability(Node *node, AggShippabilityContext * ctx)
 {
 	/* Need do nothing for empty subexpressions */
 	if (node == NULL)
@@ -133,11 +133,12 @@ foreign_expr_walker_agg_shippability(Node *node, AggShippabilityContext *ctx)
 		}
 
 		/*
-		 * When the aggsplit is AGGSPLIT_INITIAL_SERIAL and aggtranstype is INTERNALOID
-		 * (For example, when the column is bigint and we want to get sum of that column),
-		 * the PostgreSQL core will change the aggtype to bytea. When pushing down on
-		 * pgspider_ext, we need to convert the data returned from fdw to bytea. However,
-		 * currently, there is no way to convert it in pgspider_ext. Therefore, do not
+		 * When the aggsplit is AGGSPLIT_INITIAL_SERIAL and aggtranstype is
+		 * INTERNALOID (For example, when the column is bigint and we want to
+		 * get sum of that column), the PostgreSQL core will change the
+		 * aggtype to bytea. When pushing down on pgspider_ext, we need to
+		 * convert the data returned from fdw to bytea. However, currently,
+		 * there is no way to convert it in pgspider_ext. Therefore, do not
 		 * push down this case.
 		 */
 		if (agg->aggsplit == AGGSPLIT_INITIAL_SERIAL && agg->aggtranstype == INTERNALOID)
@@ -320,7 +321,13 @@ foreign_expr_walker_varattno_shifter(Node *node, AttrNumber *attrno_shift)
 	{
 		Var		   *varnode = (Var *) node;
 
-		varnode->varattno += attrno_shift[varnode->varattno - 1];
+		/*
+		 * The Locking Clause have attribute number of Var < 0. Ignore mapping
+		 * them to avoid accessing invalid element of array.
+		 */
+		if (varnode->varattno - 1 >= 0)
+			varnode->varattno += attrno_shift[varnode->varattno - 1];
+
 		return false;
 	}
 	else

@@ -13,15 +13,15 @@
 #include "nodes/pathnodes.h"
 #include "nodes/pg_list.h"
 
-#define CODE_VERSION   10100
+#define CODE_VERSION   10200
 
 /*
  * Options structure to store information.
  */
-typedef struct SpdPpt
+typedef struct SpdOpt
 {
 	char	   *child_name;
-}			SpdPpt;
+}			SpdOpt;
 
 /*
  * Argument used for extract_var_walker.
@@ -50,19 +50,21 @@ typedef struct AggSplitChangeWalkerContext
 
 typedef struct AggShippabilityContext
 {
-	bool			shippable;		/* this flag determine that the expression can be shipped or not */
-	bool			hasAggref;		/* this flag marks that we are checking the Aggref. It will be used
-									 * to detect if partition key is inside Aggref function */
-	AttrNumber		partkey_attno;	/* column number of partition key */
+	bool		shippable;		/* this flag determine that the expression can
+								 * be shipped or not */
+	bool		hasAggref;		/* this flag marks that we are checking the
+								 * Aggref. It will be used to detect if
+								 * partition key is inside Aggref function */
+	AttrNumber	partkey_attno;	/* column number of partition key */
 }			AggShippabilityContext;
 
 /* In pgspider_ext_option.c */
-extern SpdPpt * spd_get_options(Oid foreignoid);
+extern SpdOpt * spd_get_options(Oid userid, Oid foreignoid);
 
 /* In pgspider_ext_deparse.c */
 extern HTAB *aggsplit_history_create(void);
 extern bool foreign_expr_walker_aggsplit_change(Node *node, AggSplitChangeWalkerContext * context);
-extern bool foreign_expr_walker_agg_shippability(Node *node, AggShippabilityContext *ctx);
+extern bool foreign_expr_walker_agg_shippability(Node *node, AggShippabilityContext * ctx);
 extern void createVarAttrnoMapping(Oid parent_tableid, Oid child_tableid,
 								   AttrNumber partkey_attno,
 								   AttrNumber **attrno_to_child,

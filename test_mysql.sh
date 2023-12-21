@@ -5,13 +5,13 @@
 # Initializing data for Mysql Datasource
 # ===================================================================
 
-export MYSQL_PWD="edb"
+export MYSQL_PWD="edbnewpolicy"
 MYSQL_HOST="localhost"
 MYSQL_PORT="3306"
 MYSQL_USER_NAME="edb"
 
 # Below commands must be run first time to create mysql_fdw_post database
-# used in regression tests with edb user and edb password.
+# used in regression tests with edb user and edbnewpolicy password.
 
 # --connect to mysql with root user
 # mysql -u root -p
@@ -23,12 +23,12 @@ MYSQL_USER_NAME="edb"
 # SET GLOBAL validate_password.mixed_case_count = 0;
 # SET GLOBAL validate_password.number_count = 0;
 # SET GLOBAL validate_password.special_char_count = 0;
-# CREATE USER 'edb'@'localhost' IDENTIFIED BY 'edb';
+# CREATE USER 'edb'@'localhost' IDENTIFIED BY 'edbnewpolicy';
 # GRANT ALL PRIVILEGES ON mysql_fdw_post.* TO 'edb'@'localhost';
 # GRANT SUPER ON *.* TO 'edb'@localhost;
 
 # Set time zone to default time zone of make check PST.
-# SET GLOBAL time_zone = '-8:00';
+# SET GLOBAL time_zone = '+00:00';
 # SET GLOBAL log_bin_trust_function_creators = 1;
 # SET GLOBAL local_infile=1;
 
@@ -72,9 +72,15 @@ mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "DR
 mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "DROP TABLE IF EXISTS batch_table;"
 mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "DROP TABLE IF EXISTS tru_rtable;"
 mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "DROP TABLE IF EXISTS tru_rtable2;"
+mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "DROP TABLE IF EXISTS child_local;"
+mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "DROP TABLE IF EXISTS tab_batch_sharded_p1_remote;"
+mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "DROP TABLE IF EXISTS analyze_table;"
+mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "DROP TABLE IF EXISTS ploc1;"
+mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "DROP TABLE IF EXISTS ploc2;"
+mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "DROP TABLE IF EXISTS batch_table_2;"
 
-mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE \`T 0\` (\`C 1\` int PRIMARY KEY, c2 int NOT NULL, c3 text, c4 timestamp, c5 timestamp, c6 varchar(10), c7 char(10), c8 text);"
-mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE \`T 1\` (\`C 1\` int PRIMARY KEY, c2 int NOT NULL, c3 text, c4 timestamp, c5 timestamp, c6 varchar(10), c7 char(10), c8 text);"
+mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE \`T 0\` (\`C 1\` int PRIMARY KEY, c2 int NOT NULL, c3 text, c4 timestamp, c5 datetime, c6 varchar(10), c7 char(10), c8 text);"
+mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE \`T 1\` (\`C 1\` int PRIMARY KEY, c2 int NOT NULL, c3 text, c4 timestamp, c5 datetime, c6 varchar(10), c7 char(10), c8 text);"
 mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE test (c1 int PRIMARY KEY, c2 int NOT NULL, c3 text, c4 timestamp, c5 timestamp, c6 varchar(10), c7 char(10), c8 text);"
 mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE \`T 2\` (c1 int, c2 text, CONSTRAINT t2_pkey PRIMARY KEY (c1));"
 mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE \`T 3\` (c1 int, c2 int NOT NULL, c3 text, CONSTRAINT t3_pkey PRIMARY KEY (c1));"
@@ -118,6 +124,12 @@ mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "IN
 mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE batch_table ( x int PRIMARY KEY);"
 mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE tru_rtable (id int PRIMARY KEY);"
 mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE tru_rtable2 (id int PRIMARY KEY);"
+mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE child_local (b text, c numeric, a int PRIMARY KEY);"
+mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE tab_batch_sharded_p1_remote (id int PRIMARY KEY, data text);"
+mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE analyze_table (id int PRIMARY KEY, a text, b bigint);"
+mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE ploc1 (f1 int PRIMARY KEY, f2 text);"
+mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE ploc2 (f1 int PRIMARY KEY, f2 text);"
+mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE batch_table_2 (id int PRIMARY KEY auto_increment, a text, b int);"
 
 
 # ===================================================================

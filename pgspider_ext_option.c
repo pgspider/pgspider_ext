@@ -14,7 +14,6 @@
 #include "catalog/pg_foreign_table.h"
 #include "commands/defrem.h"
 #include "foreign/foreign.h"
-#include "miscadmin.h"
 
 #include "pgspider_ext.h"
 
@@ -128,17 +127,17 @@ pgspider_ext_validator(PG_FUNCTION_ARGS)
 /*
  * Fetch the options for a griddb_fdw foreign table.
  */
-SpdPpt *
-spd_get_options(Oid foreignoid)
+SpdOpt *
+spd_get_options(Oid userid, Oid foreignoid)
 {
 	ForeignTable *f_table = NULL;
 	ForeignServer *f_server = NULL;
 	UserMapping *f_mapping;
 	List	   *options;
 	ListCell   *lc;
-	SpdPpt	   *opt;
+	SpdOpt	   *opt;
 
-	opt = (SpdPpt *) palloc0(sizeof(SpdPpt));
+	opt = (SpdOpt *) palloc0(sizeof(SpdOpt));
 
 	/*
 	 * Extract options from FDW objects.
@@ -155,7 +154,7 @@ spd_get_options(Oid foreignoid)
 	}
 	PG_END_TRY();
 
-	f_mapping = GetUserMapping(GetUserId(), f_server->serverid);
+	f_mapping = GetUserMapping(userid, f_server->serverid);
 
 	options = NIL;
 	if (f_table)
