@@ -334,4 +334,17 @@ CREATE TABLE ploc1 (f1 int, f2 text);
 CREATE TABLE ploc2 (f1 int, f2 text);
 CREATE TABLE analyze_table (id int, a text, b bigint);
 
+-- =======================================================================
+-- Test ReScan code path that recreates the cursor even when no parameters
+-- change (bug #17889)
+-- =======================================================================
+CREATE TABLE loct1_rescan (c1 int);
+INSERT INTO loct1_rescan VALUES (1001);
+INSERT INTO loct1_rescan VALUES (1002);
+
+CREATE TABLE loct2_rescan (c1 int, c2 text);
+INSERT INTO loct2_rescan SELECT id, to_char(id, 'FM0000') FROM generate_series(1, 1000) id;
+INSERT INTO loct2_rescan VALUES (1001, 'foo');
+INSERT INTO loct2_rescan VALUES (1002, 'bar');
+
 \q

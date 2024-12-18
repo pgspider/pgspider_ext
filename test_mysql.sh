@@ -5,13 +5,13 @@
 # Initializing data for Mysql Datasource
 # ===================================================================
 
-export MYSQL_PWD="edbnewpolicy"
+export MYSQL_PWD="Edb_1234"
 MYSQL_HOST="localhost"
 MYSQL_PORT="3306"
 MYSQL_USER_NAME="edb"
 
 # Below commands must be run first time to create mysql_fdw_post database
-# used in regression tests with edb user and edbnewpolicy password.
+# used in regression tests with edb user and Edb_1234 password.
 
 # --connect to mysql with root user
 # mysql -u root -p
@@ -23,7 +23,7 @@ MYSQL_USER_NAME="edb"
 # SET GLOBAL validate_password.mixed_case_count = 0;
 # SET GLOBAL validate_password.number_count = 0;
 # SET GLOBAL validate_password.special_char_count = 0;
-# CREATE USER 'edb'@'localhost' IDENTIFIED BY 'edbnewpolicy';
+# CREATE USER 'edb'@'localhost' IDENTIFIED BY 'Edb_1234';
 # GRANT ALL PRIVILEGES ON mysql_fdw_post.* TO 'edb'@'localhost';
 # GRANT SUPER ON *.* TO 'edb'@localhost;
 
@@ -78,6 +78,8 @@ mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "DR
 mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "DROP TABLE IF EXISTS ploc1;"
 mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "DROP TABLE IF EXISTS ploc2;"
 mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "DROP TABLE IF EXISTS batch_table_2;"
+mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -P $MYSQL_PORT -D mysql_fdw_post -e "DROP TABLE IF EXISTS loct1_rescan;"
+mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -P $MYSQL_PORT -D mysql_fdw_post -e "DROP TABLE IF EXISTS loct2_rescan;"
 
 mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE \`T 0\` (\`C 1\` int PRIMARY KEY, c2 int NOT NULL, c3 text, c4 timestamp, c5 datetime, c6 varchar(10), c7 char(10), c8 text);"
 mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE \`T 1\` (\`C 1\` int PRIMARY KEY, c2 int NOT NULL, c3 text, c4 timestamp, c5 datetime, c6 varchar(10), c7 char(10), c8 text);"
@@ -130,6 +132,8 @@ mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CR
 mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE ploc1 (f1 int PRIMARY KEY, f2 text);"
 mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE ploc2 (f1 int PRIMARY KEY, f2 text);"
 mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -D $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE batch_table_2 (id int PRIMARY KEY auto_increment, a text, b int);"
+mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -P $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE loct1_rescan (c1 int PRIMARY KEY);"
+mysql -h $MYSQL_HOST -u $MYSQL_USER_NAME -P $MYSQL_PORT -D mysql_fdw_post -e "CREATE TABLE loct2_rescan (c1 int PRIMARY KEY, c2 text);"
 
 
 # ===================================================================

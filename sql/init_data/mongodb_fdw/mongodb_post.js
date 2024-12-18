@@ -50,3 +50,5 @@ db.ft1.drop()
 db.child_local.drop()
 db.tab_batch_sharded_p1_remote.drop()
 
+db.loct1_rescan.drop()
+db.loct2_rescan.drop()

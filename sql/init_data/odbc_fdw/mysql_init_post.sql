@@ -124,6 +124,12 @@ DROP TABLE IF EXISTS loct2_4 CASCADE;
 create table loct1_4 (a int check (a in (1)), b text, id integer primary key auto_increment);
 create table loct2_4 (a int check (a in (2)), b text, id integer primary key auto_increment);
 
+-- Test rescan
+DROP TABLE IF EXISTS loct1_rescan CASCADE;
+CREATE TABLE loct1_rescan (c1 int);
+DROP TABLE IF EXISTS loct2_rescan CASCADE;
+CREATE TABLE loct2_rescan (c1 int, c2 text);
+
 -- ===================================================================
 -- test COPY FROM
 -- ===================================================================

@@ -354,6 +354,8 @@ griddb_init(const char *addr,
 				loct2,
 				loct3,
 				loct4,
+				loct1_rescan,
+				loct2_rescan,
 				loct11,
 				loct22,
 				loct12,
@@ -1030,6 +1032,19 @@ griddb_init(const char *addr,
 						2,
 						"a", GS_TYPE_INTEGER, GS_TYPE_OPTION_NOT_NULL,
 						"b", GS_TYPE_STRING, GS_TYPE_OPTION_NULLABLE);
+	if (!GS_SUCCEEDED(ret))
+		goto EXIT;
+
+	ret = set_tableInfo(store, "loct1_rescan", &loct1_rescan,
+						1,
+						"c1", GS_TYPE_INTEGER, GS_TYPE_OPTION_NOT_NULL);
+	if (!GS_SUCCEEDED(ret))
+		goto EXIT;
+
+	ret = set_tableInfo(store, "loct2_rescan", &loct2_rescan,
+						2,
+						"c1", GS_TYPE_INTEGER, GS_TYPE_OPTION_NOT_NULL,
+						"c2", GS_TYPE_STRING, GS_TYPE_OPTION_NULLABLE);
 	if (!GS_SUCCEEDED(ret))
 		goto EXIT;
 

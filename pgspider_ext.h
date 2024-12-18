@@ -13,7 +13,7 @@
 #include "nodes/pathnodes.h"
 #include "nodes/pg_list.h"
 
-#define CODE_VERSION   10200
+#define CODE_VERSION   10300
 
 /*
  * Options structure to store information.
@@ -35,7 +35,7 @@ typedef struct PartkeyWalkerContext
 typedef enum
 {
 	AGG_SPLIT_WALK_CHANGE,
-	AGG_SPLIT_WALK_REVERT
+	AGG_SPLIT_WALK_REVERT,
 }			AggSplitWalkMode;
 
 /*
