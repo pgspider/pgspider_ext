@@ -51,16 +51,16 @@ Usage of PostgreSQL installed pgspider_ext is the same as PostgreSQL. You can us
 
 ## How to install pgspider_ext
 
-The current version can work with PostgreSQL 13.12, 15.4 and 16.0.
+The current version can work with PostgreSQL 13.15, 15.7, 16.3 and 17.0.
 
 Download PostgreSQL source code.
 <pre>
-https://ftp.postgresql.org/pub/source/v16.0/postgresql-16.0.tar.gz
+https://ftp.postgresql.org/pub/source/v17.0/postgresql-17.0.tar.gz
 </pre>
 
 Decompress PostgreSQL source code. 
 <pre>
-tar xvf postgresql-16.0.tar.gz
+tar xvf postgresql-17.0.tar.gz
 </pre>
 
 Download pgspider_ext source code into "contrib/pgspider_ext" directory.
@@ -70,7 +70,7 @@ git clone XXX
 
 Build and install PostgreSQL and pgspider_ext.
 <pre>
-cd postgresql-16.0
+cd postgresql-17.0
 ./configure
 make
 sudo make install
@@ -252,26 +252,22 @@ DYNAMODB_ENDPOINT="http://localhost:8000"
 - Download and build GridDB's C Client, rename the folder to griddb and put it into pgspider_ext/sql/init_data/griddb_fdw directory.
 - Export LD_LIBRARY_PATH to the bin folder of GridDB's C Client.
 <pre>
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/jenkins/postgres/postgresql-16.0/contrib/pgspider_ext/sql/init_data/griddb_fdw/griddb/bin
-</pre>
-- Export GRIDDB_HOME to the folder of GridDB server.
-<pre>
-export GRIDDB_HOME=/home/jenkins/src/griddb-5.1.0
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/jenkins/postgres/postgresql-17.0/contrib/pgspider_ext/sql/init_data/griddb_fdw/griddb/bin
 </pre>
 - Make sure the data in sql/parameters/griddb_parameters.conf matches with data of data source.
 ### test_jdbc.sh
 - Update paths in sql/init_data/jdbc_fdw/jdbc_mysql_init.sh and sql/init_data/jdbc_fdw/jdbc_postgres_init.sh.
 <pre>
-export PGS_SRC_DIR="/home/jenkins/postgres/postgresql-16.0/"
+export PGS_SRC_DIR="/home/jenkins/postgres/postgresql-17.0/"
 
-export PGS_BIN_DIR="/home/jenkins/postgres/postgresql-16.0/PGS"
-export FDW_DIR="/home/jenkins/postgres/postgresql-16.0/contrib/pgspider_ext"
+export PGS_BIN_DIR="/home/jenkins/postgres/postgresql-17.0/PGS"
+export FDW_DIR="/home/jenkins/postgres/postgresql-17.0/contrib/pgspider_ext"
 </pre>
 - Update DB_DRIVERPATH, DB_DATA in sql/parameters/jdbc_griddb_parameters.conf, sql/parameters/jdbc_mysql_parameters.conf and sql/parameters/jdbc_postgres_parameters.conf.
 <pre>
-\set DB_DRIVERPATH	'\'/home/jenkins/src/jdbc/gridstore-jdbc-5.1.0.jar\''
+\set DB_DRIVERPATH	'\'/home/jenkins/src/jdbc/gridstore-jdbc-5.5.0.jar\''
 
-\set DB_DATA		'\'/home/jenkins/postgres/postgresql-16.0/contrib/pgspider_ext/sql/init_data/jdbc_fdw/data'
+\set DB_DATA		'\'/home/jenkins/postgres/postgresql-17.0/contrib/pgspider_ext/sql/init_data/jdbc_fdw/data'
 </pre>
 - Make sure the data in sql/parameters/jdbc_griddb_parameters.conf, sql/parameters/jdbc_mysql_parameters.conf and sql/parameters/jdbc_postgres_parameters.conf matches with data of data source.
 ### test_mongodb.sh
@@ -302,9 +298,9 @@ export FDW_DIR="/home/jenkins/postgres/postgresql-16.0/contrib/pgspider_ext"
 ### test_odbc.sh
 - Update paths in test_odbc.sh
 <pre>
-export PGS_SRC_DIR="/home/jenkins/release_FDW/postgresql-16.0"
-export PGS_BIN_DIR="/home/jenkins/release_FDW/postgresql-16.0/PGS"
-export ODBC_FDW_DIR="/home/jenkins/release_FDW/postgresql-16.0/contrib/odbc_fdw"
+export PGS_SRC_DIR="/home/jenkins/release_FDW/postgresql-17.0"
+export PGS_BIN_DIR="/home/jenkins/release_FDW/postgresql-17.0/PGS"
+export ODBC_FDW_DIR="/home/jenkins/release_FDW/postgresql-17.0/contrib/odbc_fdw"
 </pre>
 - Make sure the data in sql/parameters/odbc_mysql_parameters.conf, sql/parameters/odbc_postgres_parameters.conf matches with data of data source.
 ### test_parquet_s3_fdw.sh
@@ -327,10 +323,13 @@ fi
 ### test_pgspider_core_fdw_postgres_fdw.sh
 - Update path in sql/init_data/pgspider_core_fdw/ported_postgres_setup.sh.
 <pre>
-POSTGRES_HOME=/home/jenkins/postgres/postgresql-16.0/PGS
+POSTGRES_HOME=/home/jenkins/postgres/postgresql-17.0/PGS
 </pre>
 ### test_influxdb.sh
 - Make sure the data in sql/parameters/influxdb_parameters.conf matches with data of data source.
+
+## Limitations
+- PGSpider Extension does not support INSERT, UPDATE, DELETE.
 
 ## Contributing
 Opening issues and pull requests on GitHub are welcome.

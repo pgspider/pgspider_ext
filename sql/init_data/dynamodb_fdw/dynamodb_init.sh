@@ -27,6 +27,8 @@ aws dynamodb delete-table --table-name loct11 --endpoint-url $DYNAMODB_ENDPOINT
 aws dynamodb delete-table --table-name loct22 --endpoint-url $DYNAMODB_ENDPOINT
 aws dynamodb delete-table --table-name loc2 --endpoint-url $DYNAMODB_ENDPOINT
 aws dynamodb delete-table --table-name loc3 --endpoint-url $DYNAMODB_ENDPOINT
+aws dynamodb delete-table --table-name loct1_rescan --endpoint-url $DYNAMODB_ENDPOINT
+aws dynamodb delete-table --table-name loct2_rescan --endpoint-url $DYNAMODB_ENDPOINT
 
 # for ported_dynamodb_fdw.sql test
 aws dynamodb --endpoint-url $DYNAMODB_ENDPOINT \
@@ -137,4 +139,16 @@ aws dynamodb --endpoint-url $DYNAMODB_ENDPOINT \
         create-table --table-name loc3 \
         --attribute-definitions AttributeName=f1,AttributeType=N \
         --key-schema AttributeName=f1,KeyType=HASH \
+        --provisioned-throughput ReadCapacityUnits=1,WriteCapacityUnits=1
+
+aws dynamodb --endpoint-url $DYNAMODB_ENDPOINT \
+        create-table --table-name loct1_rescan \
+        --attribute-definitions AttributeName=c1,AttributeType=N \
+        --key-schema AttributeName=c1,KeyType=HASH \
+        --provisioned-throughput ReadCapacityUnits=1,WriteCapacityUnits=1
+
+aws dynamodb --endpoint-url $DYNAMODB_ENDPOINT \
+        create-table --table-name loct2_rescan \
+        --attribute-definitions AttributeName=c1,AttributeType=N \
+        --key-schema AttributeName=c1,KeyType=HASH \
         --provisioned-throughput ReadCapacityUnits=1,WriteCapacityUnits=1

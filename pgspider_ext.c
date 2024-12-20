@@ -18,6 +18,8 @@ PG_MODULE_MAGIC;
 
 #include <stdio.h>
 #include <stddef.h>
+#include "access/relation.h"
+#include "access/table.h"
 #include "catalog/namespace.h"
 #include "commands/explain.h"
 #include "catalog/partition.h"
@@ -26,6 +28,7 @@ PG_MODULE_MAGIC;
 #include "nodes/nodeFuncs.h"
 #include "nodes/pg_list.h"
 #include "nodes/makefuncs.h"
+#include "nodes/value.h"
 #include "miscadmin.h"
 #include "optimizer/cost.h"
 #include "optimizer/pathnode.h"
@@ -44,6 +47,7 @@ PG_MODULE_MAGIC;
 #else
 #include "utils/guc.h"
 #endif
+#include "utils/lsyscache.h"
 #include "utils/partcache.h"
 #include "utils/syscache.h"
 #include "storage/lmgr.h"
@@ -149,37 +153,6 @@ static void spdBeginForeignScan(ForeignScanState *node, int eflags);
 static TupleTableSlot *spdIterateForeignScan(ForeignScanState *node);
 static void spdReScanForeignScan(ForeignScanState *node);
 static void spdEndForeignScan(ForeignScanState *node);
-#if (PG_VERSION_NUM >= 150000)
-static void spdAddForeignUpdateTargets(PlannerInfo *root,
-									   Index rtindex,
-#else
-static void spdAddForeignUpdateTargets(Query *parsetree,
-#endif
-									   RangeTblEntry *target_rte,
-									   Relation target_relation);
-static List *spdPlanForeignModify(PlannerInfo *root,
-								  ModifyTable *plan,
-								  Index resultRelation,
-								  int subplan_index);
-static void spdBeginForeignModify(ModifyTableState *mtstate,
-								  ResultRelInfo *rinfo,
-								  List *fdw_private,
-								  int subplan_index,
-								  int eflags);
-static TupleTableSlot *spdExecForeignInsert(EState *estate,
-											ResultRelInfo *rinfo,
-											TupleTableSlot *slot,
-											TupleTableSlot *planSlot);
-static TupleTableSlot *spdExecForeignUpdate(EState *estate,
-											ResultRelInfo *rinfo,
-											TupleTableSlot *slot,
-											TupleTableSlot *planSlot);
-static TupleTableSlot *spdExecForeignDelete(EState *estate,
-											ResultRelInfo *rinfo,
-											TupleTableSlot *slot,
-											TupleTableSlot *planSlot);
-static void spdEndForeignModify(EState *estate,
-								ResultRelInfo *rinfo);
 static void spdExplainForeignScan(ForeignScanState *node, ExplainState *es);
 static void spdGetForeignUpperPaths(PlannerInfo *root,
 									UpperRelationKind stage,
@@ -188,6 +161,7 @@ static void spdGetForeignUpperPaths(PlannerInfo *root,
 static bool spdIsForeignScanParallelSafe(PlannerInfo *root,
 										 RelOptInfo *rel, RangeTblEntry *rte);
 
+static void spdBuildRelationAliases(TupleDesc tupdesc, Alias *alias, Alias *eref);
 
 /* Declarations for dynamic loading */
 PG_FUNCTION_INFO_V1(pgspider_ext_handler);
@@ -212,13 +186,13 @@ pgspider_ext_handler(PG_FUNCTION_ARGS)
 	routine->EndForeignScan = spdEndForeignScan;
 
 	/* Functions for updating foreign tables */
-	routine->AddForeignUpdateTargets = spdAddForeignUpdateTargets;
-	routine->PlanForeignModify = spdPlanForeignModify;
-	routine->BeginForeignModify = spdBeginForeignModify;
-	routine->ExecForeignInsert = spdExecForeignInsert;
-	routine->ExecForeignUpdate = spdExecForeignUpdate;
-	routine->ExecForeignDelete = spdExecForeignDelete;
-	routine->EndForeignModify = spdEndForeignModify;
+	routine->AddForeignUpdateTargets = NULL;
+	routine->PlanForeignModify = NULL;
+	routine->BeginForeignModify = NULL;
+	routine->ExecForeignInsert = NULL;
+	routine->ExecForeignUpdate = NULL;
+	routine->ExecForeignDelete = NULL;
+	routine->EndForeignModify = NULL;
 	routine->BeginForeignInsert = NULL;
 	routine->EndForeignInsert = NULL;
 	routine->IsForeignRelUpdatable = NULL;
@@ -444,13 +418,20 @@ createChildRoot(PlannerInfo *root, RelOptInfo *baserel, Oid tableid,
 	rte->rtekind = RTE_RELATION;
 	rte->relid = tableid;
 	rte->relkind = RELKIND_RELATION;
-	rte->eref = makeNode(Alias);
-	rte->eref->aliasname = pstrdup("");
 	rte->lateral = false;
 	rte->inh = false;
 	rte->inFromCl = true;
-	rte->eref = makeAlias(pstrdup(""), NIL);
 	rte->rellockmode = AccessShareLock;
+
+	if (tableid != 0)
+	{
+		Relation rel;
+		rte->alias = rte->eref = makeAlias(pstrdup(get_rel_name(tableid)), NIL);
+		rel = relation_open(tableid, AccessShareLock);
+		spdBuildRelationAliases(rel->rd_att, rte->alias, rte->eref);
+		
+		table_close(rel, NoLock);	
+	}
 
 	/*
 	 * Because in build_simple_rel() function, it assumes that a relation was
@@ -900,6 +881,9 @@ spdGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid)
 														   pathkeys,
 														   baserel->lateral_relids,
 														   NULL,	/* no outerpath */
+#if PG_VERSION_NUM >= 170000
+														   NIL, /* no fdw_restrictinfo list */
+#endif
 														   list_make1_int(path_pos)));	/* fdw_private */
 		path_pos++;
 	}
@@ -1821,156 +1805,6 @@ spdEndForeignScan(ForeignScanState *node)
 	RelationClose(child_scan_info->fsstate->ss.ss_currentRelation);
 }
 
-/**
- * spdAddForeignUpdateTargets
- *
- * Add column(s) needed for update/delete on a foreign table,
- * we are using first column as row identification column, so we are adding that into target
- * list.
- * Checking IN clause. In currently, must use IN.
- *
- * @param[in] PlannerInfo *root
- * @param[in] Index *rtindex
- * @param[in] RangeTblEntry *target_rte
- * @param[in] Relation target_relation
- */
-static void
-#if (PG_VERSION_NUM >= 150000)
-			spdAddForeignUpdateTargets(PlannerInfo *root,
-									   Index rtindex,
-#else
-spdAddForeignUpdateTargets(Query *parsetree,
-#endif
-						   RangeTblEntry *target_rte,
-						   Relation target_relation)
-{
-	elog(DEBUG1, "AddForeignUpdateTargets");
-
-}
-
-/**
- * spdPlanForeignModify
- *
- * Add column(s) needed for update/delete on a foreign table,
- * we are using first column as row identification column, so we are adding that into target
- * list.
- * Checking IN clause. In currently, must use IN.
- *
- * @param[in] root
- * @param[in] plan
- * @param[in] resultRelation
- * @param[in] subplan_index
- */
-static List *
-spdPlanForeignModify(PlannerInfo *root,
-					 ModifyTable *plan,
-					 Index resultRelation,
-					 int subplan_index)
-{
-	elog(DEBUG1, "PlanForeignModify");
-	return NULL;
-}
-
-/**
- * spdBeginForeignModify
- *
- * Add column(s) needed for update/delete on a foreign table,
- * we are using first column as row identification column, so we are adding that into target
- * list.
- *
- * @param[in] mtstate
- * @param[in] resultRelInfo
- * @param[in] fdw_private
- * @param[in] subplan_index
- * @param[in] eflags
- */
-
-static void
-spdBeginForeignModify(ModifyTableState *mtstate,
-					  ResultRelInfo *resultRelInfo,
-					  List *fdw_private,
-					  int subplan_index,
-					  int eflags)
-{
-	elog(DEBUG1, "BeginForeignModify");
-}
-
-/**
- * spdExecForeignInsert
- *
- * Insert one row into a foreign table.
- *
- * @param[in] estate
- * @param[in] resultRelInfo
- * @param[in] slot
- * @param[in] planSlot
- */
-static TupleTableSlot *
-spdExecForeignInsert(EState *estate,
-					 ResultRelInfo *resultRelInfo,
-					 TupleTableSlot *slot,
-					 TupleTableSlot *planSlot)
-{
-	elog(DEBUG1, "ExecForeignInsert");
-	return NULL;
-}
-
-
-/**
- * spdExecForeignUpdate
- *
- * Update one row in a foreign table
- *
- * @param[in] estate
- * @param[in] resultRelInfo
- * @param[in] slot
- * @param[in] planSlot
- */
-static TupleTableSlot *
-spdExecForeignUpdate(EState *estate,
-					 ResultRelInfo *resultRelInfo,
-					 TupleTableSlot *slot,
-					 TupleTableSlot *planSlot)
-{
-	elog(DEBUG1, "ExecForeignUpdate");
-	return NULL;
-}
-
-/**
- * spdExecForeignDelete
- *
- * Delete one row in a foreign table, call child table.
- *
- * @param[in] estate
- * @param[in] resultRelInfo
- * @param[in] slot
- * @param[in] planSlot
- */
-static TupleTableSlot *
-spdExecForeignDelete(EState *estate,
-					 ResultRelInfo *resultRelInfo,
-					 TupleTableSlot *slot,
-					 TupleTableSlot *planSlot)
-{
-	elog(DEBUG1, "ExecForeignDelete");
-	return NULL;
-}
-
-/**
- * spdEndForeignModify
- *
- * Call EndForeignModify of child fdw.
- *
- * @param[in] estate
- * @param[in] resultRelInfo
- */
-static void
-spdEndForeignModify(EState *estate,
-					ResultRelInfo *resultRelInfo)
-{
-	elog(DEBUG1, "EndForeignModify");
-}
-
 /*
  * spdExplainForeignScan
  *	  Produce an extra output for EXPLAIN of a ForeignScan on a foreign table.
@@ -2194,6 +2028,9 @@ add_foreign_grouping_paths(PlannerInfo *root, RelOptInfo *grouped_rel,
 										  total_cost,
 										  NIL,	/* no pathkeys */
 										  NULL, /* no fdw_outerpath */
+#if PG_VERSION_NUM >= 170000
+										  NIL, /* no fdw_restrictinfo list */
+#endif
 										  list_make1_int(path_pos));	/* fdw_private */
 
 	/* Add generated path into grouped_rel by add_path(). */
@@ -2566,4 +2403,87 @@ spdIsForeignScanParallelSafe(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *
 		return false;
 
 	return true;
+}
+
+/*
+ * spdBuildRelationAliases
+ *	  Construct the eref column name list for a relation RTE.
+ *
+ * @param[in] tupdesc: the physical column information
+ * @param[in] alias: the user-supplied alias, or NULL if none
+ * @param[in] eref: the eref Alias to store column names
+ * 
+ * Refer buildRelationAliases() in parse_relation.c 
+ */
+
+static void
+spdBuildRelationAliases(TupleDesc tupdesc, Alias *alias, Alias *eref)
+{
+	int			maxattrs = tupdesc->natts;
+	List	   *aliaslist;
+	ListCell   *aliaslc;
+	int			numaliases;
+	int			varattno;
+	int			numdropped = 0;
+
+	Assert(eref->colnames == NIL);
+
+	if (alias)
+	{
+		aliaslist = alias->colnames;
+		aliaslc = list_head(aliaslist);
+		numaliases = list_length(aliaslist);
+		/* We'll rebuild the alias colname list */
+		alias->colnames = NIL;
+	}
+	else
+	{
+		aliaslist = NIL;
+		aliaslc = NULL;
+		numaliases = 0;
+	}
+
+	for (varattno = 0; varattno < maxattrs; varattno++)
+	{
+		Form_pg_attribute attr = TupleDescAttr(tupdesc, varattno);
+#if PG_VERSION_NUM >= 150004
+		String	   *attrname;
+#else
+		Value	   *attrname;
+#endif
+
+		if (attr->attisdropped)
+		{
+			/* Always insert an empty string for a dropped column */
+			attrname = makeString(pstrdup(""));
+			if (aliaslc)
+				alias->colnames = lappend(alias->colnames, attrname);
+			numdropped++;
+		}
+		else if (aliaslc)
+		{
+			/* Use the next user-supplied alias */
+#if PG_VERSION_NUM >= 150004
+			attrname = lfirst_node(String, aliaslc);
+#else
+			attrname = (Value *) lfirst(aliaslc);
+#endif
+			aliaslc = lnext(aliaslist, aliaslc);
+			alias->colnames = lappend(alias->colnames, attrname);
+		}
+		else
+		{
+			attrname = makeString(pstrdup(NameStr(attr->attname)));
+			/* we're done with the alias if any */
+		}
+
+		eref->colnames = lappend(eref->colnames, attrname);
+	}
+
+	/* Too many user-supplied aliases? */
+	if (aliaslc)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
+				 errmsg("table \"%s\" has %d columns available but %d columns specified",
+						eref->aliasname, maxattrs - numdropped, numaliases)));
 }

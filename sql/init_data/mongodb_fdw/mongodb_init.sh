@@ -11,4 +11,4 @@ export MONGO_PWD="edb"
 # db.createUser({user:"edb",pwd:"edb",roles:[{role:"dbOwner", db:"mongo_fdw_post_regress"},{role:"readWrite", db:"mongo_fdw_post_regress"}]})
 
 # for ported_mongodb_fdw.sql test
-mongo --host=$MONGO_HOST --port=$MONGO_PORT -u $MONGO_USER_NAME -p $MONGO_PWD --authenticationDatabase "mongo_fdw_post_regress" < sql/init_data/mongodb_fdw/mongodb_post.js > /dev/null
+mongosh --host=$MONGO_HOST --port=$MONGO_PORT -u $MONGO_USER_NAME -p $MONGO_PWD --authenticationDatabase "mongo_fdw_post_regress" < sql/init_data/mongodb_fdw/mongodb_post.js > /dev/null

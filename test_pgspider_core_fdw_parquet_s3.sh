@@ -1,6 +1,6 @@
 #!/bin/sh
 
-rm -rf /tmp/data_s3 || true
+sudo rm -rf /tmp/data_s3 || true
 
 mkdir -p /tmp/data_s3 || true
 
@@ -17,7 +17,7 @@ if [ ! "$(docker ps -q -f name=^/${container_name}$)" ]; then
         docker rm ${container_name} 
     fi
     # run minio container
-   sudo docker run -d --name ${container_name} -it -p 9000:9000 -e "MINIO_ACCESS_KEY=minioadmin" -e "MINIO_SECRET_KEY=minioadmin" -v /tmp/data_s3:/data minio/minio server /data
+   sudo docker run -d --name ${container_name} -it -p 9000:9000 -e "MINIO_ACCESS_KEY=minioadmin" -e "MINIO_SECRET_KEY=minioadmin" -v /tmp/data_s3:/data minio/minio:RELEASE.2021-04-22T15-44-28Z.hotfix.56647434e server /data
 fi
 
 sed -i 's/REGRESS =.*/REGRESS = ported_pgspider_core_fdw_import_s3 ported_pgspider_core_fdw_parquet_s3_fdw ported_pgspider_core_fdw_parquet_s3_fdw2  /' Makefile
