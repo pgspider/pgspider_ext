@@ -11,6 +11,7 @@
 #define SPD_FDW_H
 
 #include "nodes/pathnodes.h"
+#include "utils/hsearch.h"
 #include "nodes/pg_list.h"
 
 #define CODE_VERSION   10300

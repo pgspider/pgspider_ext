@@ -20,8 +20,12 @@ PG_MODULE_MAGIC;
 #include <stddef.h>
 #include "access/relation.h"
 #include "access/table.h"
+#include "access/htup_details.h"
 #include "catalog/namespace.h"
 #include "commands/explain.h"
+#if PG_VERSION_NUM >= 180000
+#include "commands/explain_state.h"
+#endif
 #include "catalog/partition.h"
 #include "foreign/fdwapi.h"
 #include "foreign/foreign.h"
@@ -876,6 +880,9 @@ spdGetForeignPaths(PlannerInfo *root, RelOptInfo *baserel, Oid foreigntableid)
 		add_path(baserel, (Path *) create_foreignscan_path(root, baserel,
 														   target,
 														   rows,
+#if PG_VERSION_NUM >= 180000
+														   childpath->disabled_nodes,
+#endif
 														   startup_cost,
 														   total_cost,
 														   pathkeys,
@@ -1280,7 +1287,11 @@ createChildEstate(EState *estate, int eflags, ChildScanInfo * childscaninfo
 	 * Init range table, in which we use range table array for exec_rt_fetch()
 	 * because it is faster than rt_fetch().
 	 */
-#if PG_VERSION_NUM >= 160000
+#if PG_VERSION_NUM >= 180000
+	/* The child query executes its own range table without partition pruning. */
+	ExecInitRangeTable(child_estate, query->rtable, permInfos,
+					   bms_add_range(NULL, 1, list_length(query->rtable)));
+#elif PG_VERSION_NUM >= 160000
 	ExecInitRangeTable(child_estate, query->rtable, permInfos);
 #else
 	ExecInitRangeTable(child_estate, query->rtable);
@@ -1314,8 +1325,6 @@ createChildTupleTableSlot(ScanState *child_ss)
 	if (child_plan->fdw_scan_tlist != NIL || child_plan->scan.scanrelid == 0)
 	{
 		child_tupledesc = ExecTypeFromTL(child_plan->fdw_scan_tlist);
-		ExecInitScanTupleSlot(child_ss->ps.state, child_ss, child_tupledesc,
-							  &TTSOpsHeapTuple);
 	}
 	else
 	{
@@ -1323,9 +1332,14 @@ createChildTupleTableSlot(ScanState *child_ss)
 
 		/* don't trust FDWs to return tuples fulfilling NOT NULL constraints */
 		child_tupledesc = CreateTupleDescCopy(RelationGetDescr(currentRelation));
-		ExecInitScanTupleSlot(child_ss->ps.state, child_ss, child_tupledesc,
-							  &TTSOpsHeapTuple);
 	}
+
+	ExecInitScanTupleSlot(child_ss->ps.state, child_ss, child_tupledesc,
+						  &TTSOpsHeapTuple
+#if PG_VERSION_NUM >= 190000
+						  , 0
+#endif
+		);
 }
 
 /*
@@ -2024,6 +2038,9 @@ add_foreign_grouping_paths(PlannerInfo *root, RelOptInfo *grouped_rel,
 										  grouped_rel,
 										  grouped_rel->reltarget,
 										  rows,
+#if PG_VERSION_NUM >= 180000
+										  child_path->disabled_nodes,
+#endif
 										  startup_cost,
 										  total_cost,
 										  NIL,	/* no pathkeys */
